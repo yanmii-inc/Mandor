@@ -1,0 +1,6 @@
+[install]
+frozenLockfile = false
+
+[server]
+port = 3000
+hostname = "0.0.0.0"
