@@ -4,6 +4,7 @@ import { handleProjects } from './routes/projects';
 import { handleAgents } from './routes/agents';
 import { handleTasks } from './routes/tasks';
 import { handleTokens } from './routes/tokens';
+import { handleModels } from './routes/models';
 
 export class ApiServer {
   private db: Db;
@@ -70,6 +71,8 @@ export class ApiServer {
         res = await handleTasks(req, this.db, this.orchestrator);
       } else if (path === '/tokens') {
         res = await handleTokens(req, this.db);
+      } else if (path === '/models') {
+        res = handleModels(req);
       } else {
         res = Response.json({ error: 'Not found' }, { status: 404 });
       }

@@ -24,6 +24,7 @@ export interface AgentProfile {
   agent_type: AgentType;
   cli_path: string | null;
   credentials_encrypted: string | null;
+  model: string | null;
   created_at: string;
 }
 
@@ -44,6 +45,7 @@ export interface Task {
   session_id: string | null;
   complexity: Complexity | null;
   token_usage: string | null;
+  model: string | null;
   confirmed: number;
   has_own_workflow: number;
   created_at: string;
@@ -79,12 +81,14 @@ export interface CreateAgentProfileInput {
   agent_type: AgentType;
   cli_path?: string;
   credentials_encrypted?: string;
+  model?: string;
 }
 
 export interface CreateTaskInput {
   project_id: string;
   agent_profile_id?: string;
   description: string;
+  model?: string;
 }
 
 // ── Agent Interface ─────────────────────────────────────────
@@ -108,8 +112,12 @@ export interface PreflightResult {
 }
 
 export interface AgentAdapter {
-  /** Start a new agent session. If `prompt` is provided it is used instead of `task.description`. */
-  start(task: Task, worktreePath: string, prompt?: string): Promise<void>;
+  /**
+   * Start a new agent session. If `prompt` is provided it is used instead of `task.description`.
+   * `model` is the resolved model id (task override → profile default → provider default);
+   * CLI-based adapters that manage models themselves may ignore it.
+   */
+  start(task: Task, worktreePath: string, prompt?: string, model?: string): Promise<void>;
   resume(sessionId: string, message: string): Promise<void>;
   stream(): AsyncIterable<AgentMessage>;
   getTokenUsage(): TokenUsage;

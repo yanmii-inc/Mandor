@@ -5,6 +5,7 @@ import type { AgentAdapter, Task, AgentMessage } from '../agents/base';
 import { AgentRegistry } from '../agents/registry';
 import { WorktreeManager } from './worktree';
 import { runPreflight } from './preflight';
+import { getDefaultModel } from '../agents/models';
 import { createTokenTracker, updateTokenUsage } from './tokens';
 import { deployAffectedTargets } from './deploy';
 
@@ -99,9 +100,8 @@ export class Orchestrator {
     const project = this.db.getProject(task.project_id);
     if (!project) throw new Error(`Project ${task.project_id} not found`);
 
-    const profile = task.agent_profile_id
-      ? this.db.getAgentProfile(task.agent_profile_id)
-      : undefined;
+    const profileId = task.agent_profile_id ?? project.agent_profile_id;
+    const profile = profileId ? this.db.getAgentProfile(profileId) : undefined;
 
     const providerMap: Record<string, 'anthropic' | 'gemini' | 'glm'> = {
       gemini: 'gemini',
@@ -133,13 +133,15 @@ export class Orchestrator {
 
     const adapter = profile
       ? this.registry.resolve(profile)
-      : task.agent_profile_id
-        ? this.registry.resolveByType('claude')
-        : this.registry.resolveByType('claude');
+      : this.registry.resolveByType('claude');
 
     const abort = new AbortController();
 
-    await adapter.start(task, worktreePath, agentPrompt);
+    // Effective model: per-task override → profile default → provider default.
+    const agentType = profile?.agent_type ?? 'claude';
+    const effectiveModel = task.model ?? profile?.model ?? getDefaultModel(agentType);
+
+    await adapter.start(task, worktreePath, agentPrompt, effectiveModel ?? undefined);
 
     const rt: RunningTask = { task, adapter, abortController: abort };
     runningTasks.set(taskId, rt);

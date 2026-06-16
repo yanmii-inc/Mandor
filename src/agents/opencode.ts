@@ -9,7 +9,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   private messageQueue: AgentMessage[] = [];
   private streamActive = false;
 
-  async start(task: Task, worktreePath: string, prompt?: string): Promise<void> {
+  async start(task: Task, worktreePath: string, prompt?: string, _model?: string): Promise<void> {
     this.abortController = new AbortController();
     this.messageQueue = [];
 

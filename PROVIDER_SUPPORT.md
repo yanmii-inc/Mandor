@@ -2,11 +2,33 @@
 
 AgentFlow now supports three LLM providers: **Anthropic (Claude)**, **Google Gemini**, and **Alibaba GLM**.
 
+## Models & Switching
+
+A **provider** (`agent_type`) is distinct from a **model**. Each provider exposes several
+models, and you can switch between them in two ways:
+
+1. **Per-profile default** — set the `model` field on an agent profile. Used whenever a task
+   doesn't specify its own.
+2. **Per-task override** — set the `model` field when creating a task. Takes precedence over the
+   profile default for that one task.
+
+Resolution order: `task.model` → `profile.model` → provider's catalog default.
+
+### Discover available models
+
+```bash
+curl http://localhost:3000/models
+# => { "claude": [{id,label}...], "gemini": [...], "glm": [...] }
+```
+
+Only models in this catalog are accepted; an invalid `model` returns a 400 with the allowed list.
+The catalog lives in `src/agents/models.ts` (single source of truth).
+
 ## Configuration
 
 Each provider requires:
-1. An API key (stored in the agent profile)
-2. A model name (optional, uses defaults if not specified)
+1. An API key (stored in the agent profile as `credentials_encrypted`)
+2. A model (optional — falls back to the provider default from the catalog)
 
 ### Creating Agent Profiles
 
@@ -17,7 +39,8 @@ curl -X POST http://localhost:3000/agent-profiles \
   -d '{
     "name": "my-claude",
     "agent_type": "claude",
-    "credentials_encrypted": "sk-ant-v0..."
+    "credentials_encrypted": "sk-ant-v0...",
+    "model": "claude-sonnet-4-5-20250929"
   }'
 
 # Gemini (Google)
@@ -27,7 +50,7 @@ curl -X POST http://localhost:3000/agent-profiles \
     "name": "my-gemini",
     "agent_type": "gemini",
     "credentials_encrypted": "AIzaSy...",
-    "cli_path": "gemini-2.0-flash"
+    "model": "gemini-2.0-flash"
   }'
 
 # GLM (Alibaba)
@@ -37,9 +60,32 @@ curl -X POST http://localhost:3000/agent-profiles \
     "name": "my-glm",
     "agent_type": "glm",
     "credentials_encrypted": "sk-...",
-    "cli_path": "glm-4-air"
+    "model": "glm-4-air"
   }'
 ```
+
+### Switching a profile's default model
+
+```bash
+curl -X PATCH http://localhost:3000/agent-profiles/<id> \
+  -H "Content-Type: application/json" \
+  -d '{ "model": "gemini-1.5-pro" }'
+```
+
+### Overriding the model for a single task
+
+```bash
+curl -X POST http://localhost:3000/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "<id>",
+    "description": "Fix the failing test",
+    "model": "claude-opus-4-20250514"
+  }'
+```
+
+> Note: `model` is now a first-class field. (It used to be crammed into `cli_path`; that hack
+> is gone — `cli_path` is reserved for an agent's CLI binary path.)
 
 ## Environment Variables
 

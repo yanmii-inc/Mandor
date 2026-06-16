@@ -1,4 +1,5 @@
 import type { Complexity, PreflightResult } from '../agents/base';
+import { PREFLIGHT_MODELS } from '../agents/models';
 
 const SYSTEM_PROMPT = `You are a task complexity classifier for an AI coding agent orchestrator.
 Analyze the given task description and classify it as one of:
@@ -39,7 +40,7 @@ async function runPreflightAnthropic(description: string, apiKey?: string): Prom
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-3-haiku-20240307',
+      model: PREFLIGHT_MODELS.anthropic,
       max_tokens: 500,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: description }],
@@ -64,7 +65,7 @@ async function runPreflightAnthropic(description: string, apiKey?: string): Prom
 
 async function runPreflightGemini(description: string, apiKey?: string): Promise<PreflightResult> {
   const key = apiKey ?? process.env['GEMINI_API_KEY'] ?? '';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${PREFLIGHT_MODELS.gemini}:generateContent?key=${key}`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -102,7 +103,7 @@ async function runPreflightGlm(description: string, apiKey?: string): Promise<Pr
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: 'glm-4-air',
+      model: PREFLIGHT_MODELS.glm,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: description },

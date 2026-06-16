@@ -1,8 +1,12 @@
+// NOTE: This is the v1 baseline schema. It is migration version 1 and runs first on every
+// database (fresh or existing). Subsequent schema changes are expressed as deltas in MIGRATIONS
+// below — do NOT edit the columns/constraints here, or fresh-DB migrations will collide with
+// the v2/v3 deltas (duplicate column, mismatched rebuild, etc.).
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS agent_profiles (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  agent_type    TEXT NOT NULL CHECK(agent_type IN ('claude','opencode','aider','cline','copilot','gemini','glm')),
+  agent_type    TEXT NOT NULL CHECK(agent_type IN ('claude','opencode','aider','cline','copilot')),
   cli_path      TEXT,
   credentials_encrypted TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -76,9 +80,18 @@ CREATE TABLE IF NOT EXISTS agent_profiles_v2 (
   credentials_encrypted TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
-INSERT OR IGNORE INTO agent_profiles_v2 SELECT * FROM agent_profiles;
+INSERT OR IGNORE INTO agent_profiles_v2 (id, name, agent_type, cli_path, credentials_encrypted, created_at)
+  SELECT id, name, agent_type, cli_path, credentials_encrypted, created_at FROM agent_profiles;
 DROP TABLE agent_profiles;
 ALTER TABLE agent_profiles_v2 RENAME TO agent_profiles;
+`,
+  },
+  {
+    version: 3,
+    // Add per-profile default model and per-task model override.
+    sql: `
+ALTER TABLE agent_profiles ADD COLUMN model TEXT;
+ALTER TABLE tasks ADD COLUMN model TEXT;
 `,
   },
 ];

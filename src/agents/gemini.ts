@@ -1,9 +1,10 @@
 import type { AgentAdapter, AgentMessage, TokenUsage, Task } from './base';
 import type { Db } from '../db/index';
-import { executeTool, TOOL_DEFINITIONS, AGENT_SYSTEM_PROMPT, type ToolCall } from './llm-coding-tools';
+import { executeTool, TOOL_DEFINITIONS, AGENT_SYSTEM_PROMPT } from './llm-coding-tools';
+import type { ToolCall } from './llm-coding-tools';
+import { getDefaultModel } from './models';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_MODEL = 'gemini-2.0-flash';
 const MAX_TURNS = 50;
 
 type GeminiPart =
@@ -39,17 +40,17 @@ export class GeminiAdapter implements AgentAdapter {
     this.db = db;
   }
 
-  async start(task: Task, worktreePath: string, prompt?: string): Promise<void> {
+  async start(task: Task, worktreePath: string, prompt?: string, model?: string): Promise<void> {
     this.abortController = new AbortController();
     this.messageQueue = [];
     this.tokenUsage = { input: 0, output: 0, total: 0 };
 
     const profile = task.agent_profile_id ? this.db.getAgentProfile(task.agent_profile_id) : undefined;
     const apiKey = profile?.credentials_encrypted ?? process.env['GEMINI_API_KEY'] ?? '';
-    const model = profile?.cli_path ?? DEFAULT_MODEL;
+    const resolvedModel = model ?? getDefaultModel('gemini')!;
 
     this.streamActive = true;
-    this.runAgentLoop(prompt ?? task.description, worktreePath, apiKey, model).catch(() => {});
+    this.runAgentLoop(prompt ?? task.description, worktreePath, apiKey, resolvedModel).catch(() => {});
   }
 
   async resume(_sessionId: string, _message: string): Promise<void> {

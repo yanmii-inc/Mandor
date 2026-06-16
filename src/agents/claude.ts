@@ -22,19 +22,26 @@ export class ClaudeAdapter implements AgentAdapter {
     this.db = db;
   }
 
-  async start(task: Task, worktreePath: string, prompt?: string): Promise<void> {
+  private model: string | undefined;
+  private apiKey: string | undefined;
+
+  async start(task: Task, worktreePath: string, prompt?: string, model?: string): Promise<void> {
     this.abortController = new AbortController();
 
     const profile = task.agent_profile_id ? this.db.getAgentProfile(task.agent_profile_id) : undefined;
-    const apiKey = profile?.credentials_encrypted;
+    this.apiKey = profile?.credentials_encrypted ?? undefined;
+    this.model = model;
 
     const options: Record<string, any> = {
       cwd: worktreePath,
       permissionMode: 'acceptEdits',
     };
 
-    if (apiKey) {
-      options.apiKey = apiKey;
+    if (this.apiKey) {
+      options.apiKey = this.apiKey;
+    }
+    if (this.model) {
+      options.model = this.model;
     }
 
     const gen = query({
@@ -48,12 +55,20 @@ export class ClaudeAdapter implements AgentAdapter {
   async resume(sessionId: string, message: string): Promise<void> {
     this.abortController = new AbortController();
 
+    const options: Record<string, any> = {
+      resume: sessionId,
+      permissionMode: 'acceptEdits',
+    };
+    if (this.apiKey) {
+      options.apiKey = this.apiKey;
+    }
+    if (this.model) {
+      options.model = this.model;
+    }
+
     const gen = query({
       prompt: message,
-      options: {
-        resume: sessionId,
-        permissionMode: 'acceptEdits',
-      },
+      options,
     });
 
     this.activeStream = this.makeStream(gen);

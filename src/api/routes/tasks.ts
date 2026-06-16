@@ -1,5 +1,6 @@
 import type { Db } from '../../db/index';
 import type { CreateTaskInput } from '../../agents/base';
+import { PROVIDER_MODELS, isValidModel } from '../../agents/models';
 import { Orchestrator } from '../../orchestrator/index';
 
 export function handleTasks(req: Request, db: Db, orchestrator: Orchestrator): Response | Promise<Response> {
@@ -56,6 +57,25 @@ async function createTask(req: Request, db: Db, orchestrator: Orchestrator): Pro
     const project = db.getProject(body.project_id);
     if (!project) {
       return Response.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    // If a model override is given, validate it against the resolved provider.
+    if (body.model !== undefined) {
+      if (body.model === '') {
+        return Response.json({ error: 'model must not be empty' }, { status: 400 });
+      }
+      if (body.model !== null) {
+        const profileId = body.agent_profile_id ?? project.agent_profile_id ?? undefined;
+        const profile = profileId ? db.getAgentProfile(profileId) : undefined;
+        const agentType = profile?.agent_type ?? 'claude';
+        if (!isValidModel(agentType, body.model)) {
+          const allowed = PROVIDER_MODELS[agentType]?.map(m => m.id).join(', ') ?? '(none)';
+          return Response.json(
+            { error: `model "${body.model}" is not valid for agent_type "${agentType}". Allowed: ${allowed}` },
+            { status: 400 },
+          );
+        }
+      }
     }
 
     const task = db.createTask(body);

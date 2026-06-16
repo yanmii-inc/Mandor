@@ -4,6 +4,38 @@
 
 All endpoints are served from `http://<host>:<port>`. Default: `http://0.0.0.0:3000`.
 
+## Models
+
+### Discover Available Models
+
+```
+GET /models
+```
+
+Returns the selectable models per provider. Only models in this catalog are accepted; an invalid `model` returns a 400 with the allowed list.
+
+Returns `200`:
+
+```json
+{
+  "claude": [
+    { "id": "claude-sonnet-4-5-20250929", "label": "Claude Sonnet 4.5" },
+    { "id": "claude-opus-4-20250514", "label": "Claude Opus 4" },
+    { "id": "claude-3-5-haiku-20241022", "label": "Claude 3.5 Haiku" }
+  ],
+  "gemini": [
+    { "id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash" },
+    { "id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro" },
+    { "id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash" }
+  ],
+  "glm": [
+    { "id": "glm-4-air", "label": "GLM-4 Air" },
+    { "id": "glm-4-plus", "label": "GLM-4 Plus" },
+    { "id": "glm-4-flash", "label": "GLM-4 Flash" }
+  ]
+}
+```
+
 ## Projects
 
 ### Create a Project
@@ -18,11 +50,17 @@ POST /projects
   "repo_url": "https://github.com/you/my-app.git",
   "local_path": "/home/ubuntu/my-app",
   "agent_profile_id": "optional-uuid",
-  "deploy_config": "optional-json-string"
+  "targets": [
+    {
+      "name": "production",
+      "path": "/var/www/app",
+      "deploy_command": "npm run build && pm2 restart app"
+    }
+  ]
 }
 ```
 
-Returns `201` with the created project.
+Returns `201` with the created project (including any targets).
 
 ### List Projects
 
@@ -31,6 +69,54 @@ GET /projects
 ```
 
 Returns `200` with an array of projects.
+
+### Deploy Targets
+
+#### Create a Deploy Target
+
+```
+POST /projects/:id/targets
+```
+
+```json
+{
+  "name": "staging",
+  "path": "/var/www/staging",
+  "deploy_command": "docker compose up -d --build"
+}
+```
+
+Returns `201`.
+
+#### List Deploy Targets
+
+```
+GET /projects/:id/targets
+```
+
+Returns `200` with an array of deploy targets.
+
+#### Update a Deploy Target
+
+```
+PUT /projects/:id/targets/:targetId
+```
+
+```json
+{
+  "deploy_command": "npm run build && pm2 restart app"
+}
+```
+
+Returns `200`.
+
+#### Delete a Deploy Target
+
+```
+DELETE /projects/:id/targets/:targetId
+```
+
+Returns `204`.
 
 ## Agent Profiles
 
@@ -42,14 +128,22 @@ POST /agent-profiles
 
 ```json
 {
-  "name": "claude-dev",
+  "name": "my-claude",
   "agent_type": "claude",
-  "cli_path": "/usr/local/bin/claude",
-  "credentials_encrypted": "optional-encrypted-key"
+  "credentials_encrypted": "sk-ant-v0...",
+  "model": "claude-sonnet-4-5-20250929"
 }
 ```
 
-`agent_type` must be one of: `claude`, `opencode`, `aider`, `cline`, `copilot`.
+`agent_type` must be one of: `claude`, `gemini`, `glm`, `opencode`, `aider`, `cline`, `copilot`.
+
+| Provider | API Key Source | Default Model |
+|---|---|---|
+| `claude` | `credentials_encrypted` or `ANTHROPIC_API_KEY` env | `claude-sonnet-4-5-20250929` |
+| `gemini` | `credentials_encrypted` or `GEMINI_API_KEY` env | `gemini-2.0-flash` |
+| `glm` | `credentials_encrypted` or `GLM_API_KEY` env | `glm-4-air` |
+
+The `model` field is optional. When omitted, the provider's default model is used.
 
 Returns `201` with the created profile.
 
@@ -61,7 +155,42 @@ GET /agent-profiles
 
 Returns `200` with an array of profiles.
 
+### Get Agent Profile
+
+```
+GET /agent-profiles/:id
+```
+
+Returns `200` with the profile, or `404`.
+
+### Update Agent Profile
+
+```
+PATCH /agent-profiles/:id
+```
+
+```json
+{
+  "name": "renamed-profile",
+  "model": "claude-opus-4-20250514"
+}
+```
+
+Only provided fields are updated. Set `model` to `null` to clear the profile default (reverts to provider default).
+
+Returns `200` with the updated profile.
+
 ## Tasks
+
+### Model Resolution
+
+When dispatching a task, the effective model is resolved in this order:
+
+```
+task.model → profile.model → provider default (from catalog)
+```
+
+If the task or profile doesn't specify a model, the provider's default is used.
 
 ### Dispatch a Task
 
@@ -72,12 +201,18 @@ POST /tasks
 ```json
 {
   "project_id": "uuid",
+  "description": "Fix the failing test",
   "agent_profile_id": "optional-uuid",
-  "description": "Natural language task description"
+  "model": "claude-opus-4-20250514"
 }
 ```
 
-Triggers preflight check. Returns `201` with the task. If complex, the task stays `pending` until confirmed.
+Triggers a preflight complexity check. Returns `201` with the task.
+
+- `agent_profile_id` — overrides the project's default profile for this task
+- `model` — overrides the profile's default model for this task (validated against the resolved provider)
+
+If the preflight returns `complex` and the task is not pre-confirmed, it stays `pending` until confirmed.
 
 ### List Tasks
 

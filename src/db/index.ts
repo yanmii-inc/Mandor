@@ -117,10 +117,17 @@ export class Db {
   createAgentProfile(input: CreateAgentProfileInput): AgentProfile {
     const id = crypto.randomUUID();
     const stmt = this.db.prepare(
-      `INSERT INTO agent_profiles (id, name, agent_type, cli_path, credentials_encrypted)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO agent_profiles (id, name, agent_type, cli_path, credentials_encrypted, model)
+       VALUES (?, ?, ?, ?, ?, ?)`
     );
-    stmt.run(id, input.name, input.agent_type, input.cli_path ?? null, input.credentials_encrypted ?? null);
+    stmt.run(
+      id,
+      input.name,
+      input.agent_type,
+      input.cli_path ?? null,
+      input.credentials_encrypted ?? null,
+      input.model ?? null,
+    );
     return this.getAgentProfile(id)!;
   }
 
@@ -132,15 +139,27 @@ export class Db {
     return this.db.prepare('SELECT * FROM agent_profiles ORDER BY created_at DESC').all() as AgentProfile[];
   }
 
+  updateAgentProfile(
+    id: string,
+    updates: Partial<Pick<AgentProfile, 'name' | 'cli_path' | 'credentials_encrypted' | 'model'>>
+  ): AgentProfile | undefined {
+    const fields = Object.keys(updates);
+    if (fields.length === 0) return this.getAgentProfile(id);
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => (updates as any)[f]);
+    this.db.prepare(`UPDATE agent_profiles SET ${setClause} WHERE id = ?`).run(...values, id);
+    return this.getAgentProfile(id);
+  }
+
   // ── Tasks ─────────────────────────────────────────────────
 
   createTask(input: CreateTaskInput): Task {
     const id = crypto.randomUUID();
     const stmt = this.db.prepare(
-      `INSERT INTO tasks (id, project_id, agent_profile_id, description)
-       VALUES (?, ?, ?, ?)`
+      `INSERT INTO tasks (id, project_id, agent_profile_id, description, model)
+       VALUES (?, ?, ?, ?, ?)`
     );
-    stmt.run(id, input.project_id, input.agent_profile_id ?? null, input.description);
+    stmt.run(id, input.project_id, input.agent_profile_id ?? null, input.description, input.model ?? null);
     return this.getTask(id)!;
   }
 
