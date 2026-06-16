@@ -99,7 +99,23 @@ export class Orchestrator {
     const project = this.db.getProject(task.project_id);
     if (!project) throw new Error(`Project ${task.project_id} not found`);
 
-    const preflight = await runPreflight(task.description);
+    const profile = task.agent_profile_id
+      ? this.db.getAgentProfile(task.agent_profile_id)
+      : undefined;
+
+    const providerMap: Record<string, 'anthropic' | 'gemini' | 'glm'> = {
+      gemini: 'gemini',
+      glm: 'glm',
+      claude: 'anthropic',
+      opencode: 'anthropic',
+      aider: 'anthropic',
+      cline: 'anthropic',
+      copilot: 'anthropic',
+    };
+    const provider = providerMap[profile?.agent_type ?? 'claude'];
+    const apiKey = profile?.credentials_encrypted ?? undefined;
+
+    const preflight = await runPreflight(task.description, apiKey, provider);
     this.db.updateTask(task.id, { complexity: preflight.complexity });
 
     if (preflight.complexity === 'complex' && !task.confirmed) {
@@ -114,10 +130,6 @@ export class Orchestrator {
     this.db.updateTask(task.id, { worktree_path: worktreePath, branch_name: branch });
 
     const agentPrompt = buildAgentPrompt(task.description, hasWorkflow);
-
-    const profile = task.agent_profile_id
-      ? this.db.getAgentProfile(task.agent_profile_id)
-      : undefined;
 
     const adapter = profile
       ? this.registry.resolve(profile)

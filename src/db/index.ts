@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { SCHEMA_SQL } from './schema';
+import { MIGRATIONS } from './schema';
 import type {
   Project,
   DeployTarget,
@@ -23,7 +23,26 @@ export class Db {
   }
 
   private migrate(): void {
-    this.db.exec(SCHEMA_SQL);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+
+    const appliedVersions = new Set(
+      (this.db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[])
+        .map(r => r.version),
+    );
+
+    for (const migration of MIGRATIONS) {
+      if (!appliedVersions.has(migration.version)) {
+        this.db.transaction(() => {
+          this.db.exec(migration.sql);
+          this.db.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(migration.version);
+        })();
+      }
+    }
   }
 
   // ── Projects ──────────────────────────────────────────────

@@ -1,0 +1,10 @@
+{
+  "agent_servers": {
+    "claude-acp": {
+      "type": "registry",
+      "env": {
+        "ANTHROPIC_API_KEY": "",
+      },
+    },
+  },
+}

@@ -2,7 +2,7 @@ export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS agent_profiles (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  agent_type    TEXT NOT NULL CHECK(agent_type IN ('claude','opencode','aider','cline','copilot')),
+  agent_type    TEXT NOT NULL CHECK(agent_type IN ('claude','opencode','aider','cline','copilot','gemini','glm')),
   cli_path      TEXT,
   credentials_encrypted TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -62,5 +62,23 @@ export const MIGRATIONS = [
   {
     version: 1,
     sql: SCHEMA_SQL,
+  },
+  {
+    version: 2,
+    // Widen the agent_type CHECK to include gemini and glm.
+    // SQLite can't ALTER a column constraint, so we recreate the table.
+    sql: `
+CREATE TABLE IF NOT EXISTS agent_profiles_v2 (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  agent_type    TEXT NOT NULL CHECK(agent_type IN ('claude','opencode','aider','cline','copilot','gemini','glm')),
+  cli_path      TEXT,
+  credentials_encrypted TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO agent_profiles_v2 SELECT * FROM agent_profiles;
+DROP TABLE agent_profiles;
+ALTER TABLE agent_profiles_v2 RENAME TO agent_profiles;
+`,
   },
 ];

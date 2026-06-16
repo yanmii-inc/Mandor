@@ -2,6 +2,8 @@ import type { AgentAdapter, AgentProfile, AgentType } from './base';
 import { ClaudeAdapter } from './claude';
 import { OpenCodeAdapter } from './opencode';
 import { AiderAdapter } from './aider';
+import { GeminiAdapter } from './gemini';
+import { GlmAdapter } from './glm';
 import type { Db } from '../db/index';
 
 export class AgentRegistry {
@@ -19,6 +21,10 @@ export class AgentRegistry {
         return new OpenCodeAdapter();
       case 'aider':
         return new AiderAdapter();
+      case 'gemini':
+        return new GeminiAdapter(this.db);
+      case 'glm':
+        return new GlmAdapter(this.db);
       default:
         return new OpenCodeAdapter();
     }
@@ -32,6 +38,10 @@ export class AgentRegistry {
         return new OpenCodeAdapter();
       case 'aider':
         return new AiderAdapter();
+      case 'gemini':
+        return new GeminiAdapter(this.db);
+      case 'glm':
+        return new GlmAdapter(this.db);
       default:
         return new OpenCodeAdapter();
     }

@@ -27,7 +27,7 @@ export interface AgentProfile {
   created_at: string;
 }
 
-export type AgentType = 'claude' | 'opencode' | 'aider' | 'cline' | 'copilot';
+export type AgentType = 'claude' | 'opencode' | 'aider' | 'cline' | 'copilot' | 'gemini' | 'glm';
 
 export type TaskStatus = 'pending' | 'running' | 'pr_ready' | 'merged' | 'deploying' | 'deployed' | 'deploy_failed' | 'failed';
 export type Complexity = 'simple' | 'medium' | 'complex';

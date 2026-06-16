@@ -13,37 +13,14 @@ Respond with a JSON object:
   "reasoning": "brief explanation"
 }`;
 
-export async function runPreflight(description: string, apiKey?: string): Promise<PreflightResult> {
+export async function runPreflight(description: string, apiKey?: string, provider: 'anthropic' | 'gemini' | 'glm' = 'anthropic'): Promise<PreflightResult> {
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey ?? process.env['ANTHROPIC_API_KEY'] ?? '',
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 500,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: description }],
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Preflight API error: ${response.status} ${text}`);
+    if (provider === 'gemini') {
+      return await runPreflightGemini(description, apiKey);
+    } else if (provider === 'glm') {
+      return await runPreflightGlm(description, apiKey);
     }
-
-    const data = await response.json() as any;
-    const content = data.content?.[0]?.text ?? '';
-    const parsed = JSON.parse(content) as PreflightResult;
-
-    return {
-      complexity: parsed.complexity ?? 'medium',
-      estimated_tokens: parsed.estimated_tokens ?? { min: 1000, max: 5000 },
-      reasoning: parsed.reasoning ?? '',
-    };
+    return await runPreflightAnthropic(description, apiKey);
   } catch (err) {
     return {
       complexity: 'medium',
@@ -51,4 +28,100 @@ export async function runPreflight(description: string, apiKey?: string): Promis
       reasoning: `Preflight failed, defaulting to medium: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+async function runPreflightAnthropic(description: string, apiKey?: string): Promise<PreflightResult> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey ?? process.env['ANTHROPIC_API_KEY'] ?? '',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 500,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: description }],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Preflight API error: ${response.status} ${text}`);
+  }
+
+  const data = await response.json() as any;
+  const content = data.content?.[0]?.text ?? '';
+  const parsed = JSON.parse(content) as PreflightResult;
+
+  return {
+    complexity: parsed.complexity ?? 'medium',
+    estimated_tokens: parsed.estimated_tokens ?? { min: 1000, max: 5000 },
+    reasoning: parsed.reasoning ?? '',
+  };
+}
+
+async function runPreflightGemini(description: string, apiKey?: string): Promise<PreflightResult> {
+  const key = apiKey ?? process.env['GEMINI_API_KEY'] ?? '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: 'user', parts: [{ text: description }] }],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Gemini API error: ${response.status} ${text}`);
+  }
+
+  const data = await response.json() as any;
+  const textParts = data.candidates?.[0]?.content?.parts?.filter((p: any) => 'text' in p) ?? [];
+  const content = textParts.map((p: any) => p.text).join('\n');
+  const parsed = JSON.parse(content) as PreflightResult;
+
+  return {
+    complexity: parsed.complexity ?? 'medium',
+    estimated_tokens: parsed.estimated_tokens ?? { min: 1000, max: 5000 },
+    reasoning: parsed.reasoning ?? '',
+  };
+}
+
+async function runPreflightGlm(description: string, apiKey?: string): Promise<PreflightResult> {
+  const key = apiKey ?? process.env['GLM_API_KEY'] ?? '';
+
+  const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: 'glm-4-air',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: description },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GLM API error: ${response.status} ${text}`);
+  }
+
+  const data = await response.json() as any;
+  const content = data.choices?.[0]?.message?.content ?? '';
+  const parsed = JSON.parse(content) as PreflightResult;
+
+  return {
+    complexity: parsed.complexity ?? 'medium',
+    estimated_tokens: parsed.estimated_tokens ?? { min: 1000, max: 5000 },
+    reasoning: parsed.reasoning ?? '',
+  };
 }
