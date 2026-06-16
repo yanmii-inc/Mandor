@@ -26,14 +26,12 @@ export class WorktreeManager {
     const branch = `agent/${taskId}-${slug}`;
     const worktreePath = join(this.repoPath, '..', `.worktrees/${taskId}`);
 
-    const exists = await this.git.branch(['--list', branch]);
-    if (!exists) {
-      await this.git.checkoutLocalBranch(branch);
+    const branchSummary = await this.git.branch(['--list', branch]);
+    if (branchSummary.all.length === 0) {
+      await this.git.raw(['worktree', 'add', '-b', branch, worktreePath]);
     } else {
-      await this.git.checkout(branch);
+      await this.git.raw(['worktree', 'add', worktreePath, branch]);
     }
-
-    await this.git.raw(['worktree', 'add', worktreePath, branch]);
 
     return { path: worktreePath, branch };
   }

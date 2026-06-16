@@ -128,6 +128,15 @@ async function replyToTask(taskId: string, req: Request, db: Db, orchestrator: O
   }
 }
 
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  'Connection': 'keep-alive',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
 function streamLogs(taskId: string, req: Request, db: Db, orchestrator: Orchestrator): Response {
   const task = db.getTask(taskId);
   if (!task) {
@@ -148,12 +157,22 @@ function streamLogs(taskId: string, req: Request, db: Db, orchestrator: Orchestr
         sendSSE('log', JSON.stringify(log));
       }
 
+      // Close immediately for terminal states — no more messages will come
+      const terminalStatuses = ['failed', 'pr_ready', 'merged', 'deploying', 'deployed', 'deploy_failed'];
+      if (terminalStatuses.includes(task.status)) {
+        sendSSE('done', JSON.stringify({ taskId }));
+        controller.close();
+        return;
+      }
+
       // Subscribe to new messages
       const unsubscribe = orchestrator.subscribeToSSE(taskId, (msg) => {
         sendSSE('message', JSON.stringify(msg));
 
         if (msg.type === 'done') {
           sendSSE('done', JSON.stringify({ taskId }));
+          unsubscribe();
+          controller.close();
         }
 
         if (msg.type === 'error') {
@@ -163,17 +182,12 @@ function streamLogs(taskId: string, req: Request, db: Db, orchestrator: Orchestr
 
       req.signal.addEventListener('abort', () => {
         unsubscribe();
-        controller.close();
+        try { controller.close(); } catch {}
       });
     },
   });
 
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
+  // CORS headers are included here so addCors() doesn't need to re-wrap the
+  // ReadableStream body, which can corrupt chunked encoding in Bun.
+  return new Response(stream, { status: 200, headers: SSE_HEADERS });
 }

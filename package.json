@@ -7,7 +7,8 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --compile --target=bun --outfile=agentflow",
-    "lint": "bun x tsc --noEmit"
+    "lint": "bun x tsc --noEmit",
+    "deploy:ui": "cd agentflow-ui && npm run build && firebase deploy --only hosting"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
