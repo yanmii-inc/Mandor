@@ -65,15 +65,21 @@ flowchart TD
 ## Quick Start
 
 ```bash
-# Stamping a repo with a sign file (run inside your project)
+# Install
+git clone <your-repo>/consign.git && cd consign && bun install
+
+# Make the `consign` CLI available globally
+bun link
+
+# Stamp a repo with a sign file (run inside your project)
 consign init                         # creates .consign.json
 
 # Or set up a workspace root for auto-discovery
 export WORKSPACE_ROOTS='["~/my-projects"]'
 consign init ~/my-projects/my-app    # stamps a specific directory
 
-# Start the server
-bun run src/index.ts                 # scans workspace roots on startup
+# Start the server (scans workspace roots on startup)
+bun run src/index.ts
 
 # Manual project creation still works too
 curl -X POST http://localhost:3000/projects \

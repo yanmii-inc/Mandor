@@ -15,17 +15,32 @@ cd consign
 bun install
 ```
 
-## Run
+## CLI & Server
+
+The `consign` binary works as **both a CLI tool and an HTTP server**. It detects CLI commands from arguments — if you pass a command (like `init`), it runs in CLI mode; otherwise it starts the server.
+
+### Install the `consign` CLI globally
+
+```bash
+# Register globally via bun link
+bun link
+
+# Now `consign` is on your PATH:
+consign init          # create a .consign.json in the current directory
+```
+
+### Run the server
 
 ```bash
 # Development (with watch)
 bun run dev
 
-# Production
+# Production (from source)
 bun run src/index.ts
 
-# Single binary
+# Single binary (portable, no Bun needed)
 bun build --compile
+./consign              # binary also handles CLI commands
 ```
 
 The server starts on `http://0.0.0.0:3000`.
