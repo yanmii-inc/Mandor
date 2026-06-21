@@ -65,25 +65,18 @@ flowchart TD
 ## Quick Start
 
 ```bash
-# Install
-git clone <your-repo>/consign.git && cd consign && bun install
+# One-liner install (macOS ARM) — no toolchain required
+curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-arm64 \
+  -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
 
-# Stamp a repo (run inside the project you want consign to manage)
-cd /path/to/your-project
-bun run /path/to/consign/src/index.ts init     # or use the alias below
-# Or from the consign repo:  bun run init
-
-# Set up workspace roots for auto-discovery on the server
-export WORKSPACE_ROOTS='["~/my-projects"]'
+# Stamp any repo
+consign init
 
 # Start the server
-cd /path/to/consign && bun run start
-
-# Manual project creation still works too
-curl -X POST http://localhost:3000/projects \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"my-app","repo_url":"https://github.com/you/my-app.git","local_path":"/home/ubuntu/my-app"}'
+consign
 ```
+
+Or build from source: `git clone <repo> && cd consign && bun install && bun run build`
 
 Full guide → [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 

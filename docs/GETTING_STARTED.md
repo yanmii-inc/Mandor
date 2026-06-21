@@ -2,49 +2,62 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) >= 1.2
 - Git >= 2.30
 - [GitHub CLI](https://cli.github.com) `gh` (for automated PRs)
 - An API key for your chosen agent (e.g. `ANTHROPIC_API_KEY` for Claude)
 
 ## Install
 
+You have three options, depending on whether you want to build from source or just use the server binary.
+
+### Option 1: Pre-built binary (easiest, no toolchain needed)
+
+Download the latest release for your platform — no Bun, no Node, nothing else required.
+
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-arm64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+
+# macOS Intel
+curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+
+# Linux x64
+curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-linux-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+```
+
+Then use it anywhere:
+
+```bash
+consign init            # stamp the current directory
+consign                 # start the server (port 3000)
+```
+
+### Option 2: Build from source (requires Bun)
+
 ```bash
 git clone <your-repo>/consign.git
 cd consign
 bun install
+bun run build
+
+# The standalone binary is now at ./consign — copy it anywhere:
+cp consign /usr/local/bin/
+consign init
 ```
 
-## CLI & Server
-
-The `consign` binary works as **both a CLI tool and an HTTP server**. If you pass a command (like `init`) it runs in CLI mode; otherwise it starts the server.
-
-### Create a sign file (`.consign.json`)
-
-From the cloned repo directory, any of these work:
+### Option 3: Run from source (no global install)
 
 ```bash
-# Zero-setup — just use bun run
-bun run init
+git clone <your-repo>/consign.git
+cd consign
+bun install
 
-# Or register globally once, then use the bare command
+# Use via bun run from anywhere:
+bun run init                        # stamp the current directory
+bun run start                       # start the server
+
+# Or link globally for bare usage:
 bun link && consign init
-
-# Or build a portable binary
-bun run build && ./consign init
-```
-
-### Run the server
-
-```bash
-# Development (with watch)
-bun run dev
-
-# Production
-bun run start
-
-# Portable binary (no Bun needed)
-bun run build && ./consign
 ```
 
 The server starts on `http://0.0.0.0:3000`.
