@@ -53,6 +53,7 @@ flowchart TD
 - **Preflight checks** — Haiku classifies complexity; complex tasks need approval
 - **Auto PRs** — agent commits, pushes, opens a GitHub PR when done
 - **Single binary** — `bun build --compile`
+- **Auto-discovery** — `consign init` stamps any repo with a `.consign.json` sign file; the server auto-discovers projects by scanning workspace roots
 
 ## Docs
 
@@ -64,9 +65,17 @@ flowchart TD
 ## Quick Start
 
 ```bash
-bun install
-bun run src/index.ts                    # starts on :3000
+# Stamping a repo with a sign file (run inside your project)
+consign init                         # creates .consign.json
 
+# Or set up a workspace root for auto-discovery
+export WORKSPACE_ROOTS='["~/my-projects"]'
+consign init ~/my-projects/my-app    # stamps a specific directory
+
+# Start the server
+bun run src/index.ts                 # scans workspace roots on startup
+
+# Manual project creation still works too
 curl -X POST http://localhost:3000/projects \
   -H 'Content-Type: application/json' \
   -d '{"name":"my-app","repo_url":"https://github.com/you/my-app.git","local_path":"/home/ubuntu/my-app"}'

@@ -94,4 +94,11 @@ ALTER TABLE agent_profiles ADD COLUMN model TEXT;
 ALTER TABLE tasks ADD COLUMN model TEXT;
 `,
   },
+  {
+    version: 4,
+    // Add source column to track how projects were created (manual vs scan).
+    sql: `
+ALTER TABLE projects ADD COLUMN source TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual', 'scan'));
+`,
+  },
 ];

@@ -1,9 +1,19 @@
 import type { Db } from '../../db/index';
 import type { CreateProjectInput, CreateDeployTargetInput } from '../../agents/base';
+import { scanWorkspaces } from '../../scan';
 
 export function handleProjects(req: Request, db: Db): Response | Promise<Response> {
   const url = new URL(req.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
+
+  // POST /projects/scan
+  if (pathParts.length === 2 && pathParts[1] === 'scan') {
+    if (req.method === 'POST') {
+      const result = scanWorkspaces(db);
+      return Response.json(result, { status: 200 });
+    }
+    return new Response('Method not allowed', { status: 405 });
+  }
 
   // POST /projects or GET /projects
   if (pathParts.length === 1) {

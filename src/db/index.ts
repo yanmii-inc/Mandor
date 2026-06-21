@@ -50,10 +50,10 @@ export class Db {
   createProject(input: CreateProjectInput): Project {
     const id = crypto.randomUUID();
     const stmt = this.db.prepare(
-      `INSERT INTO projects (id, name, repo_url, local_path, agent_profile_id)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO projects (id, name, repo_url, local_path, agent_profile_id, source)
+       VALUES (?, ?, ?, ?, ?, ?)`
     );
-    stmt.run(id, input.name, input.repo_url, input.local_path, input.agent_profile_id ?? null);
+    stmt.run(id, input.name, input.repo_url, input.local_path, input.agent_profile_id ?? null, input.source ?? 'manual');
 
     // Create deploy targets if provided
     if (input.targets) {
@@ -69,8 +69,44 @@ export class Db {
     return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Project | undefined;
   }
 
+  getProjectByLocalPath(localPath: string): Project | undefined {
+    return this.db.prepare('SELECT * FROM projects WHERE local_path = ?').get(localPath) as Project | undefined;
+  }
+
   listProjects(): Project[] {
     return this.db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Project[];
+  }
+
+  listAllLocalPaths(): string[] {
+    return (this.db.prepare('SELECT local_path FROM projects').all() as Pick<Project, 'local_path'>[])
+      .map(r => r.local_path);
+  }
+
+  updateProject(
+    id: string,
+    updates: Partial<Pick<Project, 'name' | 'repo_url' | 'agent_profile_id'>>
+  ): Project | undefined {
+    const fields = Object.keys(updates).filter(k => k !== 'id' && k !== 'created_at');
+    if (fields.length === 0) return this.getProject(id);
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => (updates as any)[f]);
+    this.db.prepare(`UPDATE projects SET ${setClause} WHERE id = ?`).run(...values, id);
+    return this.getProject(id);
+  }
+
+  deleteProject(id: string): boolean {
+    // Cascade delete related records
+    this.db.transaction(() => {
+      const taskIds = (this.db.prepare('SELECT id FROM tasks WHERE project_id = ?').all(id) as Pick<Task, 'id'>[])
+        .map(r => r.id);
+      for (const taskId of taskIds) {
+        this.db.prepare('DELETE FROM task_logs WHERE task_id = ?').run(taskId);
+        this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+      }
+      this.db.prepare('DELETE FROM deploy_targets WHERE project_id = ?').run(id);
+      this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    })();
+    return true;
   }
 
   // ── Deploy Targets ────────────────────────────────────────

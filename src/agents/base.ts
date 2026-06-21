@@ -6,6 +6,7 @@ export interface Project {
   repo_url: string;
   local_path: string;
   agent_profile_id: string | null;
+  source: 'manual' | 'scan';
   created_at: string;
 }
 
@@ -67,6 +68,7 @@ export interface CreateProjectInput {
   repo_url: string;
   local_path: string;
   agent_profile_id?: string;
+  source?: 'manual' | 'scan';
   targets?: { name: string; path: string; deploy_command: string }[];
 }
 

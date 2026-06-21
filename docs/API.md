@@ -62,13 +62,47 @@ POST /projects
 
 Returns `201` with the created project (including any targets).
 
+### Scan Workspace Roots
+
+```
+POST /projects/scan
+```
+
+Scans every directory in `WORKSPACE_ROOTS` (env var, `~/.consign/config.json`, or default `~/consign-workspace`) for `.consign.json` sign files. Upserts discovered projects (keyed by `local_path`) and deletes stale scan-sourced projects whose sign file was removed.
+
+Returns `200`:
+
+```json
+{
+  "created": 2,
+  "updated": 1,
+  "deleted": 0,
+  "projects": [
+    {
+      "id": "uuid",
+      "name": "my-app",
+      "repo_url": "https://github.com/you/my-app.git",
+      "local_path": "/home/you/consign-workspace/my-app",
+      "agent_profile_id": null,
+      "source": "scan",
+      "created_at": "2026-06-21 10:11:16"
+    }
+  ]
+}
+```
+
 ### List Projects
 
 ```
 GET /projects
 ```
 
-Returns `200` with an array of projects.
+Returns `200` with an array of projects. Each project now includes a `source` field:
+
+| `source` | Meaning |
+|---|---|
+| `manual` | Created via `POST /projects` — never auto-deleted |
+| `scan` | Discovered from a `.consign.json` sign file — auto-deleted when the file is removed |
 
 ### Deploy Targets
 
