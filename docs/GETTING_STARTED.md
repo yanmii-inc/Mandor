@@ -16,13 +16,13 @@ Download the latest release for your platform — no Bun, no Node, nothing else 
 
 ```bash
 # macOS Apple Silicon
-curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-arm64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+curl -L https://github.com/yanmii-inc/Consign/releases/latest/download/consign-darwin-arm64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
 
 # macOS Intel
-curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+curl -L https://github.com/yanmii-inc/Consign/releases/latest/download/consign-darwin-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
 
 # Linux x64
-curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-linux-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
+curl -L https://github.com/yanmii-inc/Consign/releases/latest/download/consign-linux-x64 -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
 ```
 
 Then use it anywhere:
@@ -35,7 +35,7 @@ consign                 # start the server (port 3000)
 ### Option 2: Build from source (requires Bun)
 
 ```bash
-git clone <your-repo>/consign.git
+git clone git@github.com:yanmii-inc/Consign.git
 cd consign
 bun install
 bun run build
@@ -48,7 +48,7 @@ consign init
 ### Option 3: Run from source (no global install)
 
 ```bash
-git clone <your-repo>/consign.git
+git clone git@github.com:yanmii-inc/Consign.git
 cd consign
 bun install
 

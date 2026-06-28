@@ -66,7 +66,7 @@ flowchart TD
 
 ```bash
 # One-liner install (macOS ARM) — no toolchain required
-curl -L https://github.com/<your-org>/consign/releases/latest/download/consign-darwin-arm64 \
+curl -L https://github.com/yanmii-inc/Consign/releases/latest/download/consign-darwin-arm64 \
   -o /usr/local/bin/consign && chmod +x /usr/local/bin/consign
 
 # Stamp any repo
@@ -79,7 +79,7 @@ consign scan
 consign
 ```
 
-Or build from source: `git clone <repo> && cd consign && bun install && bun run build`
+Or build from source: `git clone git@github.com:yanmii-inc/Consign.git && cd consign && bun install && bun run build`
 
 Full guide → [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 
