@@ -28,7 +28,7 @@ export function getWorkspaceRoots(): string[] {
     }
   } catch {}
 
-  return [path.join(os.homedir(), 'consign-workspace')];
+  return [process.cwd()];
 }
 
 function findSignFiles(root: string, maxDepth: number = 5): string[] {
