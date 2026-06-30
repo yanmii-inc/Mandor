@@ -21,8 +21,14 @@ export interface RunningThread {
   abortController: AbortController;
 }
 
-const runningTasks = new Map<string, RunningTask>();
+export const runningTasks = new Map<string, RunningTask>();
 const runningThreads = new Map<string, RunningThread>();
+/**
+ * Queued mid-task replies, drained by processStream at each turn boundary.
+ * Replaces the old behavior of resuming the in-flight adapter and spawning a
+ * second processStream (which raced the first). Exported for tests.
+ */
+export const pendingTaskReplies = new Map<string, string[]>();
 const sseClients = new Map<string, Set<(msg: AgentMessage) => void>>();
 
 /**
@@ -89,6 +95,14 @@ async function pollGitHub(
   } catch {
     return null;
   }
+}
+
+/** Serialize the structured fields of an AgentMessage into a JSON `meta` string. */
+function eventMeta(msg: AgentMessage): string | null {
+  if (msg.type === 'tool_use') return JSON.stringify({ tool: msg.tool, args: msg.args });
+  if (msg.type === 'tool_result') return JSON.stringify({ tool: msg.tool, isError: msg.isError, durationMs: msg.durationMs });
+  if (msg.type === 'file_change') return JSON.stringify({ path: msg.path, diff: msg.diff });
+  return null;
 }
 
 export class Orchestrator {
@@ -174,50 +188,74 @@ export class Orchestrator {
     try {
       let sessionId: string | null = null;
 
-      for await (const message of adapter.stream()) {
-        this.broadcastToSSEClients(taskId, message);
+      // Process turns sequentially: drain a turn, then if the user queued a
+      // reply, resume and drain again; otherwise wait for the PR. This keeps a
+      // single processStream per task — no racy second loop from reply().
+      while (true) {
+        for await (const message of adapter.stream()) {
+          this.broadcastToSSEClients(taskId, message);
 
-        if (message.type === 'text') {
-          this.db.appendLog(taskId, 'agent', message.content);
-          try {
-            const parsed = JSON.parse(message.content);
-            if (parsed.session_id) {
-              sessionId = parsed.session_id;
+          // Capture the session marker without storing it as a log row.
+          if (message.type === 'text') {
+            try {
+              const parsed = JSON.parse(message.content);
+              if (parsed && typeof parsed.session_id === 'string') {
+                sessionId = parsed.session_id;
+                continue;
+              }
+            } catch {}
+          }
+
+          if (message.type === 'done') {
+            const usage = adapter.getTokenUsage();
+            updateTokenUsage(taskId, usage);
+            this.db.updateTask(taskId, {
+              token_usage: JSON.stringify(usage),
+              session_id: sessionId,
+            });
+            continue;
+          }
+
+          if (message.type === 'error') {
+            this.db.appendLog(taskId, 'agent', message.content, 'error');
+            this.db.updateTask(taskId, { status: 'failed' });
+            const currentTask = this.db.getTask(taskId);
+            if (currentTask?.worktree_path) {
+              await wt.cleanup(currentTask.worktree_path);
             }
-          } catch {}
+            return; // task failed; stop processing turns
+          }
+
+          // text / tool_use / tool_result / file_change → structured log row
+          this.db.appendLog(taskId, 'agent', message.content, message.type, eventMeta(message));
         }
 
-        if (message.type === 'tool_use') {
-          this.db.appendLog(taskId, 'agent', `[tool_use] ${message.content}`);
+        // Turn drained. A queued reply resumes immediately, skipping the PR wait.
+        const queued = pendingTaskReplies.get(taskId);
+        if (queued && queued.length > 0 && sessionId) {
+          await adapter.resume(sessionId, queued.shift()!);
+          continue;
         }
 
-        if (message.type === 'done') {
-          const usage = adapter.getTokenUsage();
-          updateTokenUsage(taskId, usage);
-          this.db.updateTask(taskId, {
-            token_usage: JSON.stringify(usage),
-            session_id: sessionId,
-          });
-
-          const currentTask = this.db.getTask(taskId);
-          if (currentTask?.branch_name) {
-            await this.waitForPR(taskId, currentTask.branch_name, owner, repo, repoPath, githubToken, wt);
+        // No pending reply → wait for the PR. waitForPR watches the queue and
+        // returns true (interrupted) if a reply lands mid-wait.
+        const currentTask = this.db.getTask(taskId);
+        if (currentTask?.branch_name) {
+          const interrupted = await this.waitForPR(taskId, currentTask.branch_name, owner, repo, repoPath, githubToken, wt);
+          if (interrupted && sessionId) {
+            const q = pendingTaskReplies.get(taskId);
+            if (q && q.length > 0) {
+              await adapter.resume(sessionId, q.shift()!);
+              continue;
+            }
           }
         }
-
-        if (message.type === 'error') {
-          this.db.appendLog(taskId, 'agent', `[error] ${message.content}`);
-          this.db.updateTask(taskId, { status: 'failed' });
-          const currentTask = this.db.getTask(taskId);
-          if (currentTask?.worktree_path) {
-            await wt.cleanup(currentTask.worktree_path);
-          }
-        }
+        break; // task complete
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         const msg = err.message ?? String(err);
-        this.db.appendLog(taskId, 'agent', `[error] ${msg}`);
+        this.db.appendLog(taskId, 'agent', msg, 'error');
         this.db.updateTask(taskId, { status: 'failed' });
         const currentTask = this.db.getTask(taskId);
         if (currentTask?.worktree_path) {
@@ -225,17 +263,19 @@ export class Orchestrator {
         }
       }
     } finally {
+      // Signal SSE clients that the task is truly done (distinct from a per-turn
+      // done, which leaves the stream open for further turns / replies).
+      this.broadcastToSSEClients(taskId, { type: 'done', content: '', terminal: true, timestamp: new Date() });
+      pendingTaskReplies.delete(taskId);
       runningTasks.delete(taskId);
     }
   }
 
   /**
-   * Poll GitHub every 30s for the task's PR lifecycle:
-   *   pr_ready — PR was opened (head matches branch)
-   *   merged   — PR changed to merged state
-   *
-   * When merged, triggers deploy of affected targets.
-   * Times out after 30 minutes.
+   * Poll GitHub every 30s for the task's PR lifecycle (pr_ready → merged).
+   * Returns true if interrupted by a queued reply (no status change, worktree
+   * preserved so the agent can resume); false on a terminal state (merged /
+   * timed out). Triggers deploy on merge. Times out after 30 minutes.
    */
   private async waitForPR(
     taskId: string,
@@ -245,11 +285,16 @@ export class Orchestrator {
     repoPath: string,
     githubToken?: string,
     wt?: WorktreeManager,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const maxAttempts = 60;
     const pollInterval = 30_000;
+    const tickMs = 1_000;
+    const replyQueued = () => (pendingTaskReplies.get(taskId)?.length ?? 0) > 0;
 
     for (let i = 0; i < maxAttempts; i++) {
+      // A queued reply interrupts the wait so the agent can continue.
+      if (replyQueued()) return true;
+
       const encodedBranch = encodeURIComponent(branch);
       const prs = await pollGitHub(
         `https://api.github.com/repos/${owner}/${repo}/pulls?head=${encodedBranch}&state=all`,
@@ -280,22 +325,25 @@ export class Orchestrator {
           if (currentTask?.worktree_path && wt) {
             await wt.cleanup(currentTask.worktree_path);
           }
-          return;
+          return false;
         }
 
         if (pr.state === 'open') {
-          // PR is open but not yet merged — mark pr_ready if not already
+          // PR is open but not yet merged — mark pr_ready if not already.
           const currentTask = this.db.getTask(taskId);
           if (currentTask?.status !== 'pr_ready') {
             this.db.updateTask(taskId, { status: 'pr_ready', pr_url: pr.html_url });
-            if (currentTask?.worktree_path && wt) {
-              await wt.cleanup(currentTask.worktree_path);
-            }
+            // Don't clean up the worktree here — a queued reply may resume the
+            // agent into this same worktree. It's cleaned on merge / timeout.
           }
         }
       }
 
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      // Sleep pollInterval, but wake within ~1s if a reply lands.
+      for (let elapsed = 0; elapsed < pollInterval; elapsed += tickMs) {
+        if (replyQueued()) return true;
+        await new Promise(resolve => setTimeout(resolve, tickMs));
+      }
     }
 
     this.db.updateTask(taskId, { status: 'failed' });
@@ -303,25 +351,25 @@ export class Orchestrator {
     if (currentTask?.worktree_path && wt) {
       await wt.cleanup(currentTask.worktree_path);
     }
+    return false;
   }
 
   async reply(taskId: string, message: string): Promise<void> {
     this.db.appendLog(taskId, 'user', message);
 
-    const running = runningTasks.get(taskId);
-    if (running) {
-      const task = this.db.getTask(taskId);
-      if (task?.session_id) {
-        await running.adapter.resume(task.session_id, message);
-        const currentTask = this.db.getTask(taskId)!;
-        const project = this.db.getProject(currentTask.project_id);
-        const { owner, repo } = project ? parseRepoUrl(project.repo_url) : { owner: '', repo: '' };
-        const githubToken = process.env['GITHUB_TOKEN'];
-        this.processStream(taskId, running.adapter, new WorktreeManager(''), owner, repo, '', githubToken);
-      }
-    } else {
+    if (!runningTasks.has(taskId)) {
       throw new Error('Task not currently running; resume not implemented for completed tasks');
     }
+
+    // Queue the reply; the running processStream injects it at the next turn
+    // boundary. This avoids resuming the in-flight adapter and spawning a second
+    // processStream (which raced the first).
+    let queue = pendingTaskReplies.get(taskId);
+    if (!queue) {
+      queue = [];
+      pendingTaskReplies.set(taskId, queue);
+    }
+    queue.push(message);
   }
 
   async killTask(taskId: string): Promise<void> {
@@ -395,9 +443,8 @@ export class Orchestrator {
       for await (const message of adapter.stream()) {
         this.broadcastToSSEClients(threadId, message);
 
+        // Capture the session marker without storing it as a message.
         if (message.type === 'text') {
-          // The SDK surfaces session_id as a synthetic {"session_id":"..."} text
-          // message — capture it, but don't store it as a chat message.
           try {
             const parsed = JSON.parse(message.content);
             if (parsed && typeof parsed.session_id === 'string') {
@@ -405,11 +452,6 @@ export class Orchestrator {
               continue;
             }
           } catch {}
-          try { this.db.appendThreadMessage(threadId, 'agent', message.content); } catch {}
-        }
-
-        if (message.type === 'tool_use') {
-          try { this.db.appendThreadMessage(threadId, 'agent', `[tool_use] ${message.content}`); } catch {}
         }
 
         if (message.type === 'done') {
@@ -421,16 +463,21 @@ export class Orchestrator {
               session_id: sessionId,
             });
           } catch {}
+          continue;
         }
 
         if (message.type === 'error') {
-          try { this.db.appendThreadMessage(threadId, 'agent', `[error] ${message.content}`); } catch {}
+          try { this.db.appendThreadMessage(threadId, 'agent', message.content, 'error'); } catch {}
+          continue;
         }
+
+        // text / tool_use / tool_result / file_change → structured row
+        try { this.db.appendThreadMessage(threadId, 'agent', message.content, message.type, eventMeta(message)); } catch {}
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         const msg = err.message ?? String(err);
-        try { this.db.appendThreadMessage(threadId, 'agent', `[error] ${msg}`); } catch {}
+        try { this.db.appendThreadMessage(threadId, 'agent', msg, 'error'); } catch {}
       }
     } finally {
       // Persist session_id even if the turn errored before `done`, so the thread

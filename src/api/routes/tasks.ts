@@ -189,7 +189,9 @@ function streamLogs(taskId: string, req: Request, db: Db, orchestrator: Orchestr
       const unsubscribe = orchestrator.subscribeToSSE(taskId, (msg) => {
         sendSSE('message', JSON.stringify(msg));
 
-        if (msg.type === 'done') {
+        // A per-turn `done` is just another message (the stream stays open so
+        // queued replies remain visible); only the terminal `done` closes it.
+        if (msg.type === 'done' && msg.terminal) {
           sendSSE('done', JSON.stringify({ taskId }));
           unsubscribe();
           controller.close();

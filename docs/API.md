@@ -119,6 +119,14 @@ Returns `200` with an array of projects. Each project now includes a `source` fi
 | `manual` | Created via `POST /projects` — never auto-deleted |
 | `scan` | Discovered from a `.mandor.json` sign file — auto-deleted when the file is removed |
 
+### Delete a Project
+
+```
+DELETE /projects/:id
+```
+
+Removes the `.mandor.json` sign file from disk and deletes the project and all associated records (tasks, deploy targets, threads). Returns `204`.
+
 ### Deploy Targets
 
 #### Create a Deploy Target
@@ -179,6 +187,7 @@ POST /agent-profiles
 {
   "name": "my-claude",
   "agent_type": "claude",
+  "cli_path": "/usr/local/bin/claude",
   "credentials_encrypted": "sk-ant-v0...",
   "model": "claude-sonnet-4-5-20250929"
 }
@@ -192,7 +201,7 @@ POST /agent-profiles
 | `gemini` | `credentials_encrypted` or `GEMINI_API_KEY` env | `gemini-2.0-flash` |
 | `glm` | `credentials_encrypted` or `GLM_API_KEY` env | `glm-5` |
 
-The `model` field is optional. When omitted, the provider's default model is used.
+The `model` field is optional. When omitted, the provider's default model is used. The `cli_path` field is optional — if omitted, the agent binary is resolved from `PATH`.
 
 Returns `201` with the created profile.
 
@@ -216,16 +225,18 @@ Returns `200` with the profile, or `404`.
 
 ```
 PATCH /agent-profiles/:id
+PUT   /agent-profiles/:id
 ```
 
 ```json
 {
   "name": "renamed-profile",
+  "cli_path": "/opt/bin/claude",
   "model": "claude-opus-4-20250514"
 }
 ```
 
-Only provided fields are updated. Set `model` to `null` to clear the profile default (reverts to provider default).
+Only provided fields are updated. Set `model` to `null` to clear the profile default (reverts to provider default). Both `PATCH` and `PUT` are accepted.
 
 Returns `200` with the updated profile.
 
@@ -513,9 +524,9 @@ Returns `200`:
 ## Task Lifecycle
 
 ```
-pending ──► running ──► pr_ready ──► merged
-                  │                    │
-                  └──► failed          └──► failed
+pending ──► running ──► pr_ready ──► merged ──► deploying ──► deployed
+                  │                    │              │
+                  └──► failed          └──► failed    └──► deploy_failed
 ```
 
 | Status | Description |
@@ -524,4 +535,7 @@ pending ──► running ──► pr_ready ──► merged
 | `running` | Agent actively working in an isolated worktree |
 | `pr_ready` | Agent finished, PR created |
 | `merged` | PR merged (manual, via GitHub) |
+| `deploying` | Deploying affected targets after merge |
+| `deployed` | All affected targets deployed successfully |
+| `deploy_failed` | One or more targets failed to deploy |
 | `failed` | Agent errored or was killed |
