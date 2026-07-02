@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import path from 'path';
 import { readFile, writeFile } from 'fs/promises';
-import { Db } from './db/index';
+import { Db, defaultDbPath } from './db/index';
 import { scanWorkspaces } from './scan';
 
 const SIGN_FILE = '.mandor.json';
@@ -45,7 +45,7 @@ async function initCommand(nameOverride?: string): Promise<void> {
 }
 
 async function scanCommand(roots: string[]): Promise<void> {
-  const dbPath = process.env['MANDOR_DB_PATH'] ?? 'mandor.db';
+  const dbPath = defaultDbPath();
   const db = new Db(dbPath);
 
   if (roots.length === 0) {
