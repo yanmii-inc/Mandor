@@ -6,35 +6,47 @@ All endpoints are served from `http://<host>:<port>`. Default: `http://0.0.0.0:3
 
 ## Models
 
-### Discover Available Models
+Models are **not** curated in a catalog — each agent reports what it supports at runtime. How the model list is sourced depends on the agent:
+
+| Agent | Model list source | Picker behavior |
+|---|---|---|
+| `claude` | Live `GET /v1/models` on Anthropic (paginated) | dropdown |
+| `gemini` | Live `GET /v1beta/models` on Google, filtered to `generateContent` | dropdown |
+| `glm` | Live `GET /v4/models` on Zhipu (undocumented; falls back to free-form on failure) | dropdown or free-form |
+| `opencode`, `aider` | Open universe — any `provider/model` string | free-form text |
+| `cline`, `copilot` | No adapter yet (passthrough) | free-form text |
+
+The `model` field on tasks/threads/profiles is therefore **free-form**: it is not validated against a fixed list. The provider/CLI is the real validator at runtime. Discovery is best-effort — a missing/invalid key or an unsupported list endpoint degrades gracefully to a free-form field rather than erroring.
+
+### Discover Models for a Profile
 
 ```
-GET /models
+GET /agent-profiles/:id/models
+GET /agent-profiles/:id/models?refresh=true
 ```
 
-Returns the selectable models per provider. Only models in this catalog are accepted; an invalid `model` returns a 400 with the allowed list.
+Resolves the profile's agent and queries its model list (see table above). Results are cached per profile for ~10 minutes; `?refresh=true` bypasses the cache. The cache is also invalidated automatically when the profile's credentials change.
 
 Returns `200`:
 
 ```json
 {
-  "claude": [
-    { "id": "claude-sonnet-4-5-20250929", "label": "Claude Sonnet 4.5" },
-    { "id": "claude-opus-4-20250514", "label": "Claude Opus 4" },
-    { "id": "claude-3-5-haiku-20241022", "label": "Claude 3.5 Haiku" }
+  "models": [
+    { "id": "glm-5.2", "label": "glm-5.2" },
+    { "id": "glm-4.7", "label": "glm-4.7" }
   ],
-  "gemini": [
-    { "id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash" },
-    { "id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro" },
-    { "id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash" }
-  ],
-  "glm": [
-    { "id": "glm-5", "label": "GLM-5" },
-    { "id": "glm-4.7", "label": "GLM-4.7" },
-    { "id": "glm-4.7-flash", "label": "GLM-4.7 Flash" }
-  ]
+  "freeForm": false
 }
 ```
+
+`freeForm` is `true` when the agent exposes no list (CLI agents, or API agents whose discovery failed) — the client should render a free-text model field.
+
+Returns `404` if the profile doesn't exist. Discovery failures never return a 5xx; they return `{ "models": [], "freeForm": true }`.
+
+### `GET /models` (deprecated)
+
+Returns `{}`. The old hardcoded-per-provider catalog was removed in favor of per-profile discovery above.
+
 
 ## Projects
 
@@ -195,13 +207,14 @@ POST /agent-profiles
 
 `agent_type` must be one of: `claude`, `gemini`, `glm`, `opencode`, `aider`, `cline`, `copilot`.
 
-| Provider | API Key Source | Default Model |
+| Provider | API Key Source | Fallback model (when none chosen) |
 |---|---|---|
-| `claude` | `credentials_encrypted` or `ANTHROPIC_API_KEY` env | `claude-sonnet-4-5-20250929` |
+| `claude` | `credentials_encrypted` or `ANTHROPIC_API_KEY` env | _(SDK default)_ |
 | `gemini` | `credentials_encrypted` or `GEMINI_API_KEY` env | `gemini-2.0-flash` |
-| `glm` | `credentials_encrypted` or `GLM_API_KEY` env | `glm-5` |
+| `glm` | `credentials_encrypted` or `GLM_API_KEY` env | `glm-4.7` |
+| `opencode`, `aider`, `cline`, `copilot` | _(managed by the CLI)_ | _(CLI default)_ |
 
-The `model` field is optional. When omitted, the provider's default model is used. The `cli_path` field is optional — if omitted, the agent binary is resolved from `PATH`.
+The `model` field is optional and **free-form** — it is not validated against a catalog (see [Models](#models)). When omitted, the fallback above applies. The `cli_path` field is optional — if omitted, the agent binary is resolved from `PATH`.
 
 Returns `201` with the created profile.
 
@@ -236,7 +249,7 @@ PUT   /agent-profiles/:id
 }
 ```
 
-Only provided fields are updated. Set `model` to `null` to clear the profile default (reverts to provider default). Both `PATCH` and `PUT` are accepted.
+Only provided fields are updated. Set `model` to `null` to clear the profile default (reverts to the agent/provider fallback). Both `PATCH` and `PUT` are accepted.
 
 Returns `200` with the updated profile.
 
@@ -247,10 +260,10 @@ Returns `200` with the updated profile.
 When dispatching a task, the effective model is resolved in this order:
 
 ```
-task.model → profile.model → provider default (from catalog)
+task.model → profile.model → agent/provider fallback
 ```
 
-If the task or profile doesn't specify a model, the provider's default is used.
+If the task or profile doesn't specify a model, the agent's fallback applies (an SDK default for `claude`; a fixed fallback for `gemini`/`glm`, which require an explicit model). The `model` value is free-form and not validated against a catalog — see [Models](#models).
 
 ### Dispatch a Task
 
@@ -270,7 +283,7 @@ POST /tasks
 Triggers a preflight complexity check. Returns `201` with the task.
 
 - `agent_profile_id` — overrides the project's default profile for this task
-- `model` — overrides the profile's default model for this task (validated against the resolved provider)
+- `model` — overrides the profile's default model for this task (free-form; validated by the provider/CLI at runtime)
 
 If the preflight returns `complex` and the task is not pre-confirmed, it stays `pending` until confirmed.
 
@@ -365,8 +378,10 @@ Read-only behavior:
 Same as tasks:
 
 ```
-thread.model → profile.model → provider default (from catalog)
+thread.model → profile.model → agent/provider fallback
 ```
+
+The `model` value is free-form and not validated against a catalog — see [Models](#models).
 
 ### Create a Thread
 
@@ -387,7 +402,7 @@ POST /threads
 - `message` — the first user turn (required)
 - `agent_profile_id` — overrides the project's default profile; must be a resumable type (`claude`/`gemini`/`glm`)
 - `title` — optional; defaults to the first 60 characters of `message`
-- `model` — overrides the profile's default model (validated against the resolved provider)
+- `model` — overrides the profile's default model (free-form; validated by the provider/CLI at runtime)
 
 Returns `201` with the created thread. The first turn runs immediately; `session_id` is populated from the stream as the agent responds:
 
@@ -539,3 +554,96 @@ pending ──► running ──► pr_ready ──► merged ──► deployin
 | `deployed` | All affected targets deployed successfully |
 | `deploy_failed` | One or more targets failed to deploy |
 | `failed` | Agent errored or was killed |
+
+## File Browser
+
+Read-only filesystem access scoped to a project's `local_path`. Every endpoint requires the project ID in the URL; the resolved path is validated against the project root and rejected if it escapes via `../` or symlink traversal.
+
+Authentication: if `AUTH_TOKEN` is set in the environment, all browse/file endpoints require `Authorization: Bearer <token>`.
+
+### Browse Directory
+
+```
+GET /browse/:projectId?path=&offset=&limit=
+```
+
+Lists the contents of a directory within the project root. Uses `readdir` with `withFileTypes` — no per-entry `stat` calls. Entries are returned directories-first, then files, both alphabetical.
+
+| Query | Default | Description |
+|---|---|---|
+| `path` | _(required)_ | Relative path from the project root |
+| `offset` | `0` | Number of entries to skip |
+| `limit` | _(all)_ | Max entries to return |
+
+Returns `200`:
+
+```json
+[
+  { "name": "src", "type": "directory" },
+  { "name": "docs", "type": "directory" },
+  { "name": "package.json", "type": "file" },
+  { "name": "tsconfig.json", "type": "file" }
+]
+```
+
+### File Metadata
+
+```
+GET /file/:projectId?path=
+```
+
+Returns metadata for a single file — no content. Line count is included for text files under 5 MB (streamed in chunks, no full-buffer read).
+
+| Query | Default | Description |
+|---|---|---|
+| `path` | _(required)_ | Relative path from the project root |
+
+Returns `200`:
+
+```json
+{
+  "size": 1423,
+  "mime": "text/javascript",
+  "modifiedAt": "2026-06-30T14:22:10.000Z",
+  "lineCount": 47
+}
+```
+
+Returns `400` if the path points to a directory or a non-file.
+
+### File Content
+
+```
+GET /file/:projectId/content?path=
+```
+
+Streams file content via `fs.createReadStream`. Supports HTTP `Range` headers for partial content (206 responses).
+
+| Query | Default | Description |
+|---|---|---|
+| `path` | _(required)_ | Relative path from the project root |
+
+**Small text files** (≤5 MB, non-binary extension) — streamed directly with a `200` response.
+
+**Large or binary files** (>5 MB or binary extension like `.png`, `.zip`, `.pdf`) — require a `Range` header. Without one the server returns `416`:
+
+```json
+{
+  "error": "File is too large for direct download. Use Range header to stream chunks.",
+  "size": 52428800,
+  "mime": "application/zip"
+}
+```
+
+**Range request** — returns `206` with `Content-Range` and partial body:
+
+```
+Range: bytes=0-1023
+```
+
+```http
+HTTP/1.1 206 Partial Content
+Content-Type: text/javascript
+Content-Range: bytes 0-1023/1423
+Content-Length: 1024
+```

@@ -2,15 +2,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/mandor_api_client.dart';
 
-// Configuration provider
+// Configuration providers
 final mandorBaseUrlProvider = StateProvider<String>((ref) {
   return 'http://localhost:3000';
 });
 
+final mandorAuthTokenProvider = StateProvider<String?>((ref) => null);
+
 // API client provider
 final mandorApiClientProvider = Provider((ref) {
   final baseUrl = ref.watch(mandorBaseUrlProvider);
-  return MandorApiClient(baseUrl: baseUrl);
+  final authToken = ref.watch(mandorAuthTokenProvider);
+  return MandorApiClient(baseUrl: baseUrl, authToken: authToken);
 });
 
 // Projects provider
@@ -49,12 +52,19 @@ class TaskCreationNotifier extends StateNotifier<AsyncValue<Task?>> {
 
   TaskCreationNotifier(this._client) : super(const AsyncValue.data(null));
 
-  Future<void> createTask(String projectId, String description) async {
+  Future<void> createTask(
+    String projectId,
+    String description, {
+    String? agentProfileId,
+    String? model,
+  }) async {
     state = const AsyncValue.loading();
     try {
       final request = CreateTaskRequest(
         projectId: projectId,
         description: description,
+        agentProfileId: agentProfileId,
+        model: model,
       );
       final task = await _client.createTask(request);
       state = AsyncValue.data(task);
@@ -153,6 +163,7 @@ class ThreadCreationNotifier extends StateNotifier<AsyncValue<Thread?>> {
       state = AsyncValue.data(thread);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      rethrow;
     }
   }
 }
@@ -175,6 +186,7 @@ class ThreadActionNotifier extends StateNotifier<AsyncValue<void>> {
       state = const AsyncValue.data(null);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      rethrow;
     }
   }
 
@@ -193,4 +205,61 @@ final threadActionProvider =
     StateNotifierProvider<ThreadActionNotifier, AsyncValue<void>>((ref) {
   final client = ref.watch(mandorApiClientProvider);
   return ThreadActionNotifier(client);
+});
+
+// Model discovery + selection live in model_selection_provider.dart
+// (per-agent-profile, discovered live from each agent).
+
+// ── File Browser Providers ───────────────────────────────────────────
+
+class BrowseParams {
+  final String projectId;
+  final String path;
+
+  BrowseParams({required this.projectId, required this.path});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BrowseParams &&
+          projectId == other.projectId &&
+          path == other.path;
+
+  @override
+  int get hashCode => projectId.hashCode ^ path.hashCode;
+}
+
+final browseProvider =
+    FutureProvider.family<List<FsEntry>, BrowseParams>((ref, params) async {
+  final client = ref.watch(mandorApiClientProvider);
+  return client.browseDirectory(params.projectId, params.path);
+});
+
+class FileParams {
+  final String projectId;
+  final String path;
+
+  FileParams({required this.projectId, required this.path});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FileParams &&
+          projectId == other.projectId &&
+          path == other.path;
+
+  @override
+  int get hashCode => projectId.hashCode ^ path.hashCode;
+}
+
+final fileMetadataProvider =
+    FutureProvider.family<FileMetadata, FileParams>((ref, params) async {
+  final client = ref.watch(mandorApiClientProvider);
+  return client.getFileMetadata(params.projectId, params.path);
+});
+
+final fileContentProvider =
+    FutureProvider.family<String, FileParams>((ref, params) async {
+  final client = ref.watch(mandorApiClientProvider);
+  return client.getFileContent(params.projectId, params.path);
 });

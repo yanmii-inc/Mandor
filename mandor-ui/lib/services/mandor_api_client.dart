@@ -23,11 +23,15 @@ void _log(String message) {
 
 class MandorApiClient {
   final String baseUrl;
+  String? authToken;
   late final http.Client _client;
 
-  MandorApiClient({required this.baseUrl}) {
+  MandorApiClient({required this.baseUrl, this.authToken}) {
     _client = http.Client();
   }
+
+  Map<String, String> get _authHeaders =>
+      authToken != null ? {'Authorization': 'Bearer $authToken'} : const {};
 
   Future<List<Project>> getProjects() async {
     try {
@@ -147,7 +151,7 @@ class MandorApiClient {
       _log('Fetching tasks${projectId != null ? ' for project $projectId' : ''}');
       final uri = Uri.parse('$baseUrl/tasks').replace(
         queryParameters: {
-          if (projectId case final id) 'project_id': id,
+          'project_id': ?projectId,
         },
       );
 
@@ -305,7 +309,7 @@ class MandorApiClient {
       _log('Fetching threads${projectId != null ? ' for project $projectId' : ''}');
       final uri = Uri.parse('$baseUrl/threads').replace(
         queryParameters: {
-          if (projectId case final id) 'project_id': id,
+          'project_id': ?projectId,
         },
       );
 
@@ -398,7 +402,7 @@ class MandorApiClient {
         body: jsonEncode(request.toJson()),
       );
 
-      if (response.statusCode != 200) {
+      if (response.statusCode != 200 && response.statusCode != 202) {
         throw MandorApiException(
           'Failed to reply to thread: ${response.body}',
           response.statusCode,
@@ -428,61 +432,254 @@ class MandorApiClient {
     }
   }
 
-  /// Stream thread logs using Server-Sent Events
+  /// Stream thread logs using Server-Sent Events, auto-reconnecting
+  /// when the connection is dropped.
   Stream<ThreadEvent> streamThreadLogs(String threadId) async* {
-    try {
-      final request = http.Request(
-        'GET',
-        Uri.parse('$baseUrl/threads/$threadId/logs'),
-      );
-      request.headers['Accept'] = 'text/event-stream';
+    // Track last reconnect to avoid tight loops
+    var retryDelay = 500;
 
-      final response = await _client.send(request);
+    while (true) {
+      try {
+        final request = http.Request(
+          'GET',
+          Uri.parse('$baseUrl/threads/$threadId/logs'),
+        );
+        request.headers['Accept'] = 'text/event-stream';
+
+        final response = await _client.send(request);
+
+        if (response.statusCode != 200) {
+          throw MandorApiException(
+            'Failed to stream thread logs: HTTP ${response.statusCode}',
+            response.statusCode,
+          );
+        }
+
+        // Reset retry delay on successful connection
+        retryDelay = 500;
+
+        String currentEvent = '';
+        await for (final line in response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+          if (line.isEmpty) continue;
+          if (line.startsWith(':')) continue;
+
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim();
+            continue;
+          }
+
+          if (line.startsWith('data: ')) {
+            final jsonStr = line.substring(6).trim();
+            if (jsonStr.isEmpty) continue;
+
+            try {
+              final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+              yield ThreadEvent(
+                event: currentEvent.isNotEmpty ? currentEvent : null,
+                role: data['role'] as String?,
+                chunk: data['chunk'] as String?,
+                type: data['type'] as String?,
+                content: data['content'] as String?,
+                errorMessage: data['message'] as String?,
+                timestamp: data['timestamp'] != null
+                    ? DateTime.parse(data['timestamp'] as String)
+                    : null,
+              );
+            } catch (e) {
+              continue;
+            }
+          }
+        }
+      } catch (e) {
+        if (e is MandorApiException) rethrow;
+        throw MandorApiException('Error streaming thread logs: $e');
+      }
+
+      // Stream ended — wait before reconnecting
+      await Future.delayed(Duration(milliseconds: retryDelay));
+      retryDelay = (retryDelay * 2).clamp(500, 10_000);
+    }
+  }
+
+  // ── File Browser ───────────────────────────────────────────────────
+
+  Future<List<FsEntry>> browseDirectory(String projectId, String path, {int offset = 0, int? limit}) async {
+    try {
+      final safePath = path.isEmpty ? '.' : path;
+      _log('Browsing directory: project=$projectId path=$safePath auth=${authToken != null ? 'yes' : 'no'}');
+      final params = <String, String>{
+        'path': safePath,
+        'offset': offset.toString(),
+      };
+      if (limit != null) params['limit'] = limit.toString();
+
+      final response = await _client.get(
+        Uri.parse('$baseUrl/browse/$projectId').replace(queryParameters: params),
+        headers: _authHeaders,
+      );
 
       if (response.statusCode != 200) {
         throw MandorApiException(
-          'Failed to stream thread logs: HTTP ${response.statusCode}',
+          'Failed to browse directory: ${response.body}',
           response.statusCode,
         );
       }
 
-      String currentEvent = '';
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (line.isEmpty) continue;
-        if (line.startsWith(':')) continue;
+      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+      return data.map((e) => FsEntry.fromJson(e as Map<String, dynamic>)).toList();
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in browseDirectory: $e');
+      throw MandorApiException('Error browsing directory: $e', null, st);
+    }
+  }
 
-        if (line.startsWith('event: ')) {
-          currentEvent = line.substring(7).trim();
-          continue;
-        }
+  Future<FileMetadata> getFileMetadata(String projectId, String path) async {
+    try {
+      _log('Fetching file metadata: project=$projectId path=$path');
+      final response = await _client.get(
+        Uri.parse('$baseUrl/file/$projectId').replace(queryParameters: {'path': path}),
+        headers: _authHeaders,
+      );
 
-        if (line.startsWith('data: ')) {
-          final jsonStr = line.substring(6).trim();
-          if (jsonStr.isEmpty) continue;
-
-          try {
-            final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-            yield ThreadEvent(
-              event: currentEvent.isNotEmpty ? currentEvent : null,
-              role: data['role'] as String?,
-              chunk: data['chunk'] as String?,
-              type: data['type'] as String?,
-              content: data['content'] as String?,
-              errorMessage: data['message'] as String?,
-              timestamp: data['timestamp'] != null
-                  ? DateTime.parse(data['timestamp'] as String)
-                  : null,
-            );
-          } catch (e) {
-            continue;
-          }
-        }
+      if (response.statusCode != 200) {
+        throw MandorApiException(
+          'Failed to fetch file metadata: ${response.body}',
+          response.statusCode,
+        );
       }
-    } catch (e) {
-      if (e is MandorApiException) rethrow;
-      throw MandorApiException('Error streaming thread logs: $e');
+
+      return FileMetadata.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in getFileMetadata: $e');
+      throw MandorApiException('Error fetching file metadata: $e', null, st);
+    }
+  }
+
+  Future<String> getFileContent(String projectId, String path) async {
+    try {
+      _log('Fetching file content: project=$projectId path=$path');
+      final response = await _client.get(
+        Uri.parse('$baseUrl/file/$projectId/content').replace(queryParameters: {'path': path}),
+        headers: _authHeaders,
+      );
+
+      if (response.statusCode == 200) {
+        return response.body;
+      }
+
+      if (response.statusCode == 416) {
+        final error = jsonDecode(response.body) as Map<String, dynamic>;
+        throw MandorApiException(
+          error['error'] as String? ?? 'File too large or binary',
+          response.statusCode,
+        );
+      }
+
+      throw MandorApiException(
+        'Failed to fetch file content: ${response.body}',
+        response.statusCode,
+      );
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in getFileContent: $e');
+      throw MandorApiException('Error fetching file content: $e', null, st);
+    }
+  }
+
+  // ── Models ──────────────────────────────────────────────────────
+
+  Future<Map<String, List<ModelInfo>>> getModels() async {
+    try {
+      _log('Fetching models from $baseUrl/models');
+      final response = await _client.get(
+        Uri.parse('$baseUrl/models'),
+      );
+
+      if (response.statusCode != 200) {
+        throw MandorApiException(
+          'Failed to fetch models: ${response.body}',
+          response.statusCode,
+        );
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final result = <String, List<ModelInfo>>{};
+      data.forEach((provider, models) {
+        final list = (models as List<dynamic>)
+            .map((e) => ModelInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
+        result[provider] = list;
+      });
+      return result;
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in getModels: $e');
+      throw MandorApiException('Error fetching models: $e', null, st);
+    }
+  }
+
+  // ── Agent Profiles ────────────────────────────────────────────────
+
+  Future<List<AgentProfile>> getAgentProfiles() async {
+    try {
+      _log('Fetching agent profiles from $baseUrl/agent-profiles');
+      final response = await _client.get(
+        Uri.parse('$baseUrl/agent-profiles'),
+        headers: _authHeaders,
+      );
+
+      if (response.statusCode != 200) {
+        throw MandorApiException(
+          'Failed to fetch agent profiles: ${response.body}',
+          response.statusCode,
+        );
+      }
+
+      final dynamic decoded = jsonDecode(response.body);
+      final List<dynamic> data = decoded is List ? decoded : [];
+      return data
+          .map((e) => AgentProfile.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in getAgentProfiles: $e');
+      throw MandorApiException('Error fetching agent profiles: $e', null, st);
+    }
+  }
+
+  /// Discover the models an agent profile supports. Set [refresh] to bypass the
+  /// server's cache. Returns a [ProfileModels] whose `freeForm` is true when the
+  /// agent exposes no list (CLI agents) — the caller then renders a text field.
+  Future<ProfileModels> getProfileModels(String profileId,
+      {bool refresh = false}) async {
+    try {
+      _log('Fetching models for profile $profileId');
+      final uri = Uri.parse('$baseUrl/agent-profiles/$profileId/models')
+          .replace(queryParameters: refresh ? const {'refresh': 'true'} : null);
+      final response = await _client.get(uri, headers: _authHeaders);
+
+      if (response.statusCode != 200) {
+        throw MandorApiException(
+          'Failed to fetch profile models: ${response.body}',
+          response.statusCode,
+        );
+      }
+
+      return ProfileModels.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } on MandorApiException {
+      rethrow;
+    } catch (e, st) {
+      _log('ERROR in getProfileModels: $e');
+      throw MandorApiException('Error fetching profile models: $e', null, st);
     }
   }
 

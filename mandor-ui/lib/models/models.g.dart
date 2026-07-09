@@ -133,15 +133,17 @@ Map<String, dynamic> _$AgentProfileToJson(AgentProfile instance) =>
 
 CreateTaskRequest _$CreateTaskRequestFromJson(Map<String, dynamic> json) =>
     CreateTaskRequest(
-      projectId: json['projectId'] as String,
+      projectId: json['project_id'] as String,
       description: json['description'] as String,
+      agentProfileId: json['agent_profile_id'] as String?,
       model: json['model'] as String?,
     );
 
 Map<String, dynamic> _$CreateTaskRequestToJson(CreateTaskRequest instance) =>
     <String, dynamic>{
-      'projectId': instance.projectId,
+      'project_id': instance.projectId,
       'description': instance.description,
+      'agent_profile_id': instance.agentProfileId,
       'model': instance.model,
     };
 
@@ -153,39 +155,37 @@ Map<String, dynamic> _$TaskReplyRequestToJson(TaskReplyRequest instance) =>
 
 Thread _$ThreadFromJson(Map<String, dynamic> json) => Thread(
   id: json['id'] as String?,
-  projectId: json['projectId'] as String?,
-  agentProfileId: json['agentProfileId'] as String?,
+  projectId: json['project_id'] as String?,
+  agentProfileId: json['agent_profile_id'] as String?,
   title: json['title'] as String?,
-  sessionId: json['sessionId'] as String?,
+  sessionId: json['session_id'] as String?,
   model: json['model'] as String?,
-  tokenUsage: json['tokenUsage'] == null
+  tokenUsage: _parseTokenUsage(json['token_usage']),
+  createdAt: json['created_at'] == null
       ? null
-      : TokenUsage.fromJson(json['tokenUsage'] as Map<String, dynamic>),
-  createdAt: json['createdAt'] == null
+      : DateTime.parse(json['created_at'] as String),
+  updatedAt: json['updated_at'] == null
       ? null
-      : DateTime.parse(json['createdAt'] as String),
-  updatedAt: json['updatedAt'] == null
-      ? null
-      : DateTime.parse(json['updatedAt'] as String),
+      : DateTime.parse(json['updated_at'] as String),
 );
 
 Map<String, dynamic> _$ThreadToJson(Thread instance) => <String, dynamic>{
   'id': instance.id,
-  'projectId': instance.projectId,
-  'agentProfileId': instance.agentProfileId,
+  'project_id': instance.projectId,
+  'agent_profile_id': instance.agentProfileId,
   'title': instance.title,
-  'sessionId': instance.sessionId,
+  'session_id': instance.sessionId,
   'model': instance.model,
-  'tokenUsage': instance.tokenUsage,
-  'createdAt': instance.createdAt?.toIso8601String(),
-  'updatedAt': instance.updatedAt?.toIso8601String(),
+  'token_usage': _tokenUsageToJson(instance.tokenUsage),
+  'created_at': instance.createdAt?.toIso8601String(),
+  'updated_at': instance.updatedAt?.toIso8601String(),
 };
 
 CreateThreadRequest _$CreateThreadRequestFromJson(Map<String, dynamic> json) =>
     CreateThreadRequest(
-      projectId: json['projectId'] as String,
+      projectId: json['project_id'] as String,
       message: json['message'] as String,
-      agentProfileId: json['agentProfileId'] as String?,
+      agentProfileId: json['agent_profile_id'] as String?,
       title: json['title'] as String?,
       model: json['model'] as String?,
     );
@@ -193,9 +193,9 @@ CreateThreadRequest _$CreateThreadRequestFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$CreateThreadRequestToJson(
   CreateThreadRequest instance,
 ) => <String, dynamic>{
-  'projectId': instance.projectId,
+  'project_id': instance.projectId,
   'message': instance.message,
-  'agentProfileId': instance.agentProfileId,
+  'agent_profile_id': instance.agentProfileId,
   'title': instance.title,
   'model': instance.model,
 };

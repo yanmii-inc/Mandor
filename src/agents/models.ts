@@ -1,32 +1,14 @@
-import type { AgentType } from './base';
-
 export interface ModelOption {
   id: string;
   label: string;
 }
 
 /**
- * Selectable models per provider. The first entry for each provider is its default.
- * Providers driven by an external CLI (opencode, aider, cline, copilot) don't expose
- * model selection here — they manage models through their own configuration.
+ * Models are no longer curated here. Each agent adapter discovers what it
+ * supports at runtime via `listModels()` — API-backed adapters (claude/gemini/
+ * glm) query their provider's models endpoint; CLI-backed adapters return `[]`
+ * (free-form, since they accept any `provider/model` string).
  */
-export const PROVIDER_MODELS: Partial<Record<AgentType, ModelOption[]>> = {
-  claude: [
-    { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-    { id: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
-    { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
-  ],
-  gemini: [
-    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
-    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-  ],
-  glm: [
-    { id: 'glm-5', label: 'GLM-5' },
-    { id: 'glm-4.7', label: 'GLM-4.7' },
-    { id: 'glm-4.7-flash', label: 'GLM-4.7 Flash' },
-  ],
-};
 
 /**
  * Cheap models used for the preflight complexity classifier — no need to spend the
@@ -38,12 +20,12 @@ export const PREFLIGHT_MODELS: Record<'anthropic' | 'gemini' | 'glm', string> = 
   glm: 'glm-4.7-flash',
 };
 
-export function getDefaultModel(agentType: AgentType): string | undefined {
-  return PROVIDER_MODELS[agentType]?.[0]?.id;
-}
-
-export function isValidModel(agentType: AgentType, model: string): boolean {
-  const models = PROVIDER_MODELS[agentType];
-  if (!models) return false;
-  return models.some(m => m.id === model);
+/**
+ * Validation is lenient: with dynamic discovery there is no hardcoded catalog to
+ * check against, and the discovered list can lag reality (a new model the picker
+ * hasn't fetched yet). The provider/CLI is the real validator at runtime, so we
+ * accept any model string here.
+ */
+export function isValidModel(_agentType: string, _model: string): boolean {
+  return true;
 }

@@ -6,6 +6,7 @@ import type {
   SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentAdapter, AgentMessage, TokenUsage, Task, AgentStartOptions, AgentResumeOptions } from './base';
+import type { ModelOption } from './models';
 import type { Db } from '../db/index';
 
 export class ClaudeAdapter implements AgentAdapter {
@@ -135,6 +136,46 @@ export class ClaudeAdapter implements AgentAdapter {
 
   async kill(): Promise<void> {
     this.abortController.abort();
+  }
+
+  /**
+   * List models from Anthropic's `/v1/models` endpoint (not the SDK, which
+   * doesn't expose listing). Cursor-paginated via `has_more` / `last_id`.
+   * Discovery is best-effort: any failure returns `[]` → caller shows free-form.
+   */
+  async listModels(apiKey?: string): Promise<ModelOption[]> {
+    const key = apiKey ?? process.env['ANTHROPIC_API_KEY'];
+    if (!key) return [];
+    const headers: Record<string, string> = {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    };
+    const models: ModelOption[] = [];
+    let afterId: string | undefined;
+    try {
+      // Page cap as a safety net against runaway loops.
+      for (let page = 0; page < 20; page++) {
+        const url = new URL('https://api.anthropic.com/v1/models');
+        url.searchParams.set('limit', '1000');
+        if (afterId) url.searchParams.set('after_id', afterId);
+        const res = await fetch(url, { headers });
+        if (!res.ok) return [];
+        const data = (await res.json()) as {
+          data?: Array<{ id: string; display_name?: string }>;
+          has_more?: boolean;
+          last_id?: string;
+        };
+        for (const m of data.data ?? []) {
+          models.push({ id: m.id, label: m.display_name ?? m.id });
+        }
+        if (!data.has_more) break;
+        afterId = data.last_id;
+        if (!afterId) break;
+      }
+    } catch {
+      return [];
+    }
+    return models;
   }
 }
 

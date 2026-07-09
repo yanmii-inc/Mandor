@@ -1,6 +1,18 @@
+import 'dart:convert';
+
 import 'package:json_annotation/json_annotation.dart';
 
 part 'models.g.dart';
+
+TokenUsage? _parseTokenUsage(dynamic value) {
+  if (value == null) return null;
+  if (value is String && value.isNotEmpty) {
+    return TokenUsage.fromJson(jsonDecode(value) as Map<String, dynamic>);
+  }
+  return TokenUsage.fromJson(value as Map<String, dynamic>);
+}
+
+dynamic _tokenUsageToJson(TokenUsage? usage) => usage?.toJson();
 
 @JsonSerializable()
 class Project {
@@ -147,13 +159,17 @@ class AgentProfile {
 
 @JsonSerializable()
 class CreateTaskRequest {
+  @JsonKey(name: 'project_id')
   final String projectId;
   final String description;
+  @JsonKey(name: 'agent_profile_id')
+  final String? agentProfileId;
   final String? model;
 
   CreateTaskRequest({
     required this.projectId,
     required this.description,
+    this.agentProfileId,
     this.model,
   });
 
@@ -176,13 +192,31 @@ class TaskReplyRequest {
 @JsonSerializable()
 class Thread {
   final String? id;
+
+  @JsonKey(name: 'project_id')
   final String? projectId;
+
+  @JsonKey(name: 'agent_profile_id')
   final String? agentProfileId;
+
   final String? title;
+
+  @JsonKey(name: 'session_id')
   final String? sessionId;
+
   final String? model;
+
+  @JsonKey(
+    name: 'token_usage',
+    fromJson: _parseTokenUsage,
+    toJson: _tokenUsageToJson,
+  )
   final TokenUsage? tokenUsage;
+
+  @JsonKey(name: 'created_at')
   final DateTime? createdAt;
+
+  @JsonKey(name: 'updated_at')
   final DateTime? updatedAt;
 
   Thread({
@@ -204,9 +238,14 @@ class Thread {
 
 @JsonSerializable()
 class CreateThreadRequest {
+  @JsonKey(name: 'project_id')
   final String projectId;
+
   final String message;
+
+  @JsonKey(name: 'agent_profile_id')
   final String? agentProfileId;
+
   final String? title;
   final String? model;
 
@@ -232,6 +271,105 @@ class ThreadReplyRequest {
   factory ThreadReplyRequest.fromJson(Map<String, dynamic> json) =>
       _$ThreadReplyRequestFromJson(json);
   Map<String, dynamic> toJson() => _$ThreadReplyRequestToJson(this);
+}
+
+class FsEntry {
+  final String name;
+  final String type;
+
+  FsEntry({required this.name, required this.type});
+
+  factory FsEntry.fromJson(Map<String, dynamic> json) {
+    return FsEntry(
+      name: json['name'] as String,
+      type: json['type'] as String,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'name': name, 'type': type};
+
+  bool get isDirectory => type == 'directory';
+}
+
+class FileMetadata {
+  final int size;
+  final String mime;
+  final DateTime modifiedAt;
+  final int? lineCount;
+
+  FileMetadata({
+    required this.size,
+    required this.mime,
+    required this.modifiedAt,
+    this.lineCount,
+  });
+
+  factory FileMetadata.fromJson(Map<String, dynamic> json) {
+    return FileMetadata(
+      size: json['size'] as int,
+      mime: json['mime'] as String,
+      modifiedAt: DateTime.parse(json['modifiedAt'] as String),
+      lineCount: json['lineCount'] as int?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'size': size,
+    'mime': mime,
+    'modifiedAt': modifiedAt.toIso8601String(),
+    'lineCount': lineCount,
+  };
+
+  bool get isText =>
+      lineCount != null ||
+      mime.startsWith('text/') ||
+      _codeMimes.contains(mime);
+}
+
+const _codeMimes = {
+  'application/json',
+  'application/typescript',
+  'application/javascript',
+  'application/xml',
+  'application/yaml',
+  'application/x-sh',
+  'application/x-bash',
+};
+
+class ModelInfo {
+  final String id;
+  final String label;
+
+  const ModelInfo({required this.id, required this.label});
+
+  factory ModelInfo.fromJson(Map<String, dynamic> json) {
+    return ModelInfo(
+      id: json['id'] as String,
+      label: json['label'] as String,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'label': label};
+}
+
+/// Models an agent profile can use, discovered live from the agent.
+/// When [freeForm] is true the agent exposes no list (CLI agents) and the user
+/// types the model string freehand.
+class ProfileModels {
+  final List<ModelInfo> models;
+  final bool freeForm;
+
+  const ProfileModels({required this.models, required this.freeForm});
+
+  factory ProfileModels.fromJson(Map<String, dynamic> json) {
+    final list = (json['models'] as List<dynamic>? ?? [])
+        .map((e) => ModelInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return ProfileModels(
+      models: list,
+      freeForm: (json['freeForm'] as bool?) ?? list.isEmpty,
+    );
+  }
 }
 
 class ThreadEvent {

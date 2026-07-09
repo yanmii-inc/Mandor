@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import { emptyAsyncIterable } from './base';
 import type { AgentAdapter, AgentMessage, TokenUsage, Task } from './base';
+import type { ModelOption } from './models';
 
 export class OpenCodeAdapter implements AgentAdapter {
   private process: ReturnType<typeof execa> | null = null;
@@ -83,5 +84,11 @@ export class OpenCodeAdapter implements AgentAdapter {
       try { this.process.kill(); } catch {}
       this.process = null;
     }
+  }
+
+  // OpenCode accepts any `provider/model` string via --model; there's no
+  // external model-list API, so return [] → the picker is free-form.
+  async listModels(_apiKey?: string): Promise<ModelOption[]> {
+    return [];
   }
 }
