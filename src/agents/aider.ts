@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import { emptyAsyncIterable } from './base';
 import type { AgentAdapter, AgentMessage, TokenUsage, Task } from './base';
+import type { ModelOption } from './models';
 
 export class AiderAdapter implements AgentAdapter {
   private process: ReturnType<typeof execa> | null = null;
@@ -81,5 +82,11 @@ export class AiderAdapter implements AgentAdapter {
       try { this.process.kill(); } catch {}
       this.process = null;
     }
+  }
+
+  // Aider accepts any litellm `provider/model` string via --model; there's no
+  // external model-list API, so return [] → the picker is free-form.
+  async listModels(_apiKey?: string): Promise<ModelOption[]> {
+    return [];
   }
 }

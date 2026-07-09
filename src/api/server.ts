@@ -6,6 +6,7 @@ import { handleTasks } from './routes/tasks';
 import { handleThreads } from './routes/threads';
 import { handleTokens } from './routes/tokens';
 import { handleModels } from './routes/models';
+import { handleFiles } from './routes/files';
 
 export class ApiServer {
   private db: Db;
@@ -21,6 +22,7 @@ export class ApiServer {
     this.server = Bun.serve({
       port,
       hostname,
+      idleTimeout: 0,
       fetch: (req) => this.handleRequest(req),
     });
 
@@ -77,6 +79,10 @@ export class ApiServer {
         res = await handleTokens(req, this.db);
       } else if (path === '/models') {
         res = handleModels(req);
+      } else if (path.startsWith('/browse/')) {
+        res = await handleFiles(req, this.db);
+      } else if (path.startsWith('/file/')) {
+        res = await handleFiles(req, this.db);
       } else {
         res = Response.json({ error: 'Not found' }, { status: 404 });
       }

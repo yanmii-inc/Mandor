@@ -1,3 +1,5 @@
+import type { ModelOption } from './models';
+
 // ── Data Types ──────────────────────────────────────────────
 
 export interface Project {
@@ -34,7 +36,9 @@ export type AgentType = 'claude' | 'opencode' | 'aider' | 'cline' | 'copilot' | 
 /**
  * Agent types that support session resume, and therefore can back a multi-turn
  * thread. Claude resumes natively; gemini/glm rebuild from stored history.
- * opencode/aider/cline/copilot have no resume support yet.
+ *
+ * TODO: Add opencode, aider, cline, copilot — each needs its own resume strategy
+ * in the adapter layer (e.g., history replay for those without native session IDs).
  */
 export const RESUMABLE_AGENT_TYPES: AgentType[] = ['claude', 'gemini', 'glm'];
 
@@ -209,6 +213,15 @@ export interface AgentAdapter {
   stream(): AsyncIterable<AgentMessage>;
   getTokenUsage(): TokenUsage;
   kill(): Promise<void>;
+  /**
+   * Discover the models this agent supports, for rendering a model picker.
+   * API-backed agents (claude/gemini/glm) query the provider's models endpoint
+   * with `apiKey` (the profile's stored key, or env fallback). CLI-backed agents
+   * and adapters without a discovery path return `[]`, which the caller treats
+   * as "free-form" — the user types the model string the CLI expects. Never
+   * throws: discovery failures degrade to `[]`.
+   */
+  listModels(apiKey?: string): Promise<ModelOption[]>;
 }
 
 // ── SSE Types ───────────────────────────────────────────────

@@ -1,5 +1,12 @@
 import { Database } from 'bun:sqlite';
+import { homedir } from 'os';
+import { join, dirname } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { MIGRATIONS } from './schema';
+
+export function defaultDbPath(): string {
+  return process.env['MANDOR_DB_PATH'] ?? join(homedir(), '.mandor', 'mandor.db');
+}
 import type {
   Project,
   DeployTarget,
@@ -18,7 +25,9 @@ import type {
 export class Db {
   private db: Database;
 
-  constructor(path: string = 'mandor.db') {
+  constructor(path: string = defaultDbPath()) {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.db = new Database(path);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');

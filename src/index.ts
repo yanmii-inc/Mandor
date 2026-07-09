@@ -1,4 +1,4 @@
-import { Db } from './db/index';
+import { Db, defaultDbPath } from './db/index';
 import { ApiServer } from './api/server';
 import { runCLI } from './cli';
 import { scanWorkspaces } from './scan';
@@ -9,7 +9,7 @@ if (process.argv.length > 2) {
   process.exit(0);
 }
 
-const dbPath = process.env['MANDOR_DB_PATH'] ?? 'mandor.db';
+const dbPath = defaultDbPath();
 const port = parseInt(process.env['PORT'] ?? '3000', 10);
 const hostname = process.env['HOST'] ?? '0.0.0.0';
 

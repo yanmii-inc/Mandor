@@ -8,9 +8,12 @@ import {
   READONLY_AGENT_SYSTEM_PROMPT,
 } from './llm-coding-tools';
 import type { ToolCall } from './llm-coding-tools';
-import { getDefaultModel } from './models';
+import type { ModelOption } from './models';
 
 const GLM_BASE = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+// Fallback used only when no model is supplied — GLM's API requires an explicit
+// model in the body. Not a curated catalog: the live picker comes from listModels().
+const DEFAULT_MODEL = 'glm-4.7';
 const MAX_TURNS = 50;
 
 interface OpenAiMessage {
@@ -61,7 +64,7 @@ export class GlmAdapter implements AgentAdapter {
 
     const profile = task.agent_profile_id ? this.db.getAgentProfile(task.agent_profile_id) : undefined;
     const apiKey = profile?.credentials_encrypted ?? process.env['GLM_API_KEY'] ?? '';
-    const resolvedModel = model ?? getDefaultModel('glm')!;
+    const resolvedModel = model ?? DEFAULT_MODEL;
     const readonly = opts?.permissionMode === 'plan';
 
     // Surface a session marker so the orchestrator can persist + resume. GLM has
@@ -85,7 +88,7 @@ export class GlmAdapter implements AgentAdapter {
     this.tokenUsage = { input: 0, output: 0, total: 0 };
 
     const apiKey = opts?.apiKey ?? process.env['GLM_API_KEY'] ?? '';
-    const resolvedModel = opts?.model ?? getDefaultModel('glm')!;
+    const resolvedModel = opts?.model ?? DEFAULT_MODEL;
     const readonly = opts?.permissionMode === 'plan';
     const cwd = opts?.cwd ?? process.cwd();
     const systemPrompt = readonly ? READONLY_AGENT_SYSTEM_PROMPT : AGENT_SYSTEM_PROMPT;
@@ -264,5 +267,30 @@ export class GlmAdapter implements AgentAdapter {
   async kill(): Promise<void> {
     this.abortController.abort();
     this.streamActive = false;
+  }
+
+  /**
+   * Attempt to list models from ZhipuAI's models endpoint (OpenAI-compatible
+   * shape `{ data: [{ id }] }`). The endpoint is undocumented, so any failure
+   * returns `[]` → the caller shows a free-form model field.
+   */
+  async listModels(apiKey?: string): Promise<ModelOption[]> {
+    const key = apiKey ?? process.env['GLM_API_KEY'];
+    if (!key) return [];
+    try {
+      const res = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { data?: Array<{ id: string }> };
+      const models: ModelOption[] = [];
+      for (const m of data.data ?? []) {
+        models.push({ id: m.id, label: m.id });
+      }
+      return models;
+    } catch {
+      return [];
+    }
   }
 }

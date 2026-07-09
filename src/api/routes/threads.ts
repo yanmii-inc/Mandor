@@ -1,7 +1,6 @@
 import type { Db } from '../../db/index';
 import type { CreateThreadInput } from '../../agents/base';
 import { RESUMABLE_AGENT_TYPES } from '../../agents/base';
-import { PROVIDER_MODELS, isValidModel } from '../../agents/models';
 import { Orchestrator } from '../../orchestrator/index';
 
 export function handleThreads(req: Request, db: Db, orchestrator: Orchestrator): Response | Promise<Response> {
@@ -72,16 +71,8 @@ async function createThread(req: Request, db: Db, orchestrator: Orchestrator): P
       );
     }
 
-    // Model is validated against the resolved provider.
-    if (body.model !== undefined && body.model !== null && body.model !== '') {
-      if (!isValidModel(agentType, body.model)) {
-        const allowed = PROVIDER_MODELS[agentType]?.map(m => m.id).join(', ') ?? '(none)';
-        return Response.json(
-          { error: `model "${body.model}" is not valid for agent_type "${agentType}". Allowed: ${allowed}` },
-          { status: 400 },
-        );
-      }
-    }
+    // Model is free-form / provider-discovered; no catalog to validate against.
+    // The provider/CLI is the real validator at runtime.
 
     const thread = db.createThread(body);
 
@@ -133,12 +124,21 @@ async function replyToThread(threadId: string, req: Request, db: Db, orchestrato
       return Response.json({ error: 'Thread not found' }, { status: 404 });
     }
 
-    await orchestrator.replyThread(threadId, body.message);
-    return Response.json({ status: 'ok' }, { status: 200 });
-  } catch (err: any) {
-    if (err.message?.includes('already in progress')) {
-      return Response.json({ error: err.message }, { status: 409 });
+    // Always persist the message first, so the SSE stream replays it
+    // even when a turn is already in progress.
+    db.appendThreadMessage(threadId, 'user', body.message);
+
+    try {
+      await orchestrator.replyThread(threadId, body.message);
+      return Response.json({ status: 'ok' }, { status: 200 });
+    } catch (err: any) {
+      if (err.message?.includes('already in progress')) {
+        // Message saved; turn will pick it up when current one finishes.
+        return Response.json({ status: 'accepted', message: 'Queued' }, { status: 202 });
+      }
+      throw err;
     }
+  } catch (err: any) {
     return Response.json({ error: err.message }, { status: 400 });
   }
 }
@@ -158,7 +158,7 @@ function streamThreadLogs(threadId: string, req: Request, db: Db, orchestrator: 
     return Response.json({ error: 'Thread not found' }, { status: 404 });
   }
 
-  const stream = new ReadableStream({
+      const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
 
@@ -171,6 +171,12 @@ function streamThreadLogs(threadId: string, req: Request, db: Db, orchestrator: 
       for (const msg of existingMessages) {
         sendSSE('log', JSON.stringify(msg));
       }
+
+      // Keep-alive ping every 30s so the connection isn't dropped by
+      // proxies / Bun's idleTimeout even when no events are flowing.
+      const keepAlive = setInterval(() => {
+        try { controller.enqueue(encoder.encode(': keepalive\n\n')); } catch {}
+      }, 30_000);
 
       // A thread is long-lived (many turns), so unlike /tasks we keep the stream
       // open across turns: `done` signals a turn finished but does NOT close the
@@ -185,6 +191,7 @@ function streamThreadLogs(threadId: string, req: Request, db: Db, orchestrator: 
       });
 
       req.signal.addEventListener('abort', () => {
+        clearInterval(keepAlive);
         unsubscribe();
         try { controller.close(); } catch {}
       });

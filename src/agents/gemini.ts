@@ -8,9 +8,13 @@ import {
   READONLY_AGENT_SYSTEM_PROMPT,
 } from './llm-coding-tools';
 import type { ToolCall } from './llm-coding-tools';
-import { getDefaultModel } from './models';
+import type { ModelOption } from './models';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+// Fallback used only when neither the task, the profile, nor the caller supplies
+// a model — Gemini's API requires an explicit model in the URL. Not a curated
+// catalog: the live picker comes from listModels().
+const DEFAULT_MODEL = 'gemini-2.0-flash';
 const MAX_TURNS = 50;
 
 type GeminiPart =
@@ -59,7 +63,7 @@ export class GeminiAdapter implements AgentAdapter {
 
     const profile = task.agent_profile_id ? this.db.getAgentProfile(task.agent_profile_id) : undefined;
     const apiKey = profile?.credentials_encrypted ?? process.env['GEMINI_API_KEY'] ?? '';
-    const resolvedModel = model ?? getDefaultModel('gemini')!;
+    const resolvedModel = model ?? DEFAULT_MODEL;
     const readonly = opts?.permissionMode === 'plan';
 
     // Surface a session marker so the orchestrator can persist + resume. Gemini
@@ -79,7 +83,7 @@ export class GeminiAdapter implements AgentAdapter {
     this.tokenUsage = { input: 0, output: 0, total: 0 };
 
     const apiKey = opts?.apiKey ?? process.env['GEMINI_API_KEY'] ?? '';
-    const resolvedModel = opts?.model ?? getDefaultModel('gemini')!;
+    const resolvedModel = opts?.model ?? DEFAULT_MODEL;
     const readonly = opts?.permissionMode === 'plan';
     const cwd = opts?.cwd ?? process.cwd();
 
@@ -276,5 +280,35 @@ export class GeminiAdapter implements AgentAdapter {
   async kill(): Promise<void> {
     this.abortController.abort();
     this.streamActive = false;
+  }
+
+  /**
+   * List models from Google's `/v1beta/models` endpoint, filtered to those that
+   * support `generateContent`. Best-effort: any failure returns `[]`.
+   */
+  async listModels(apiKey?: string): Promise<ModelOption[]> {
+    const key = apiKey ?? process.env['GEMINI_API_KEY'];
+    if (!key) return [];
+    try {
+      const res = await fetch(`${GEMINI_BASE}?key=${key}&pageSize=1000`, { method: 'GET' });
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        models?: Array<{
+          name: string;
+          displayName?: string;
+          supportedGenerationMethods?: string[];
+        }>;
+      };
+      const models: ModelOption[] = [];
+      for (const m of data.models ?? []) {
+        const methods = m.supportedGenerationMethods ?? [];
+        if (!methods.includes('generateContent')) continue;
+        const id = m.name.replace(/^models\//, '');
+        models.push({ id, label: m.displayName ?? id });
+      }
+      return models;
+    } catch {
+      return [];
+    }
   }
 }

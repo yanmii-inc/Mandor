@@ -6,7 +6,6 @@ import { RESUMABLE_AGENT_TYPES } from '../agents/base';
 import { AgentRegistry } from '../agents/registry';
 import { WorktreeManager } from './worktree';
 import { runPreflight } from './preflight';
-import { getDefaultModel } from '../agents/models';
 import { createTokenTracker, updateTokenUsage } from './tokens';
 import { deployAffectedTargets } from './deploy';
 
@@ -158,9 +157,10 @@ export class Orchestrator {
 
     const abort = new AbortController();
 
-    // Effective model: per-task override → profile default → provider default.
-    const agentType = profile?.agent_type ?? 'claude';
-    const effectiveModel = task.model ?? profile?.model ?? getDefaultModel(agentType);
+    // Effective model: per-task override → profile default. If neither is set,
+    // the adapter/provider applies its own default (Claude SDK default; a local
+    // fallback constant for gemini/glm which require an explicit model).
+    const effectiveModel = task.model ?? profile?.model ?? undefined;
 
     await adapter.start(task, worktreePath, agentPrompt, effectiveModel ?? undefined);
 
@@ -417,7 +417,7 @@ export class Orchestrator {
     }
 
     const apiKey = profile?.credentials_encrypted ?? undefined;
-    const effectiveModel = thread.model ?? profile?.model ?? getDefaultModel(agentType);
+    const effectiveModel = thread.model ?? profile?.model ?? undefined;
 
     // The first user turn was persisted by the route before dispatching.
     const userMessages = this.db.getThreadMessages(threadId);
@@ -486,6 +486,18 @@ export class Orchestrator {
         try { this.db.updateThread(threadId, { session_id: sessionId }); } catch {}
       }
       runningThreads.delete(threadId);
+
+      // If a user message was queued while this turn was running, start
+      // processing it immediately rather than requiring a separate API call.
+      try {
+        const msgs = this.db.getThreadMessages(threadId);
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === 'user') {
+          this.replyThread(threadId, last.chunk).catch((err: any) => {
+            console.error(`Auto-reply thread ${threadId} failed:`, err.message ?? err);
+          });
+        }
+      } catch {}
     }
   }
 
@@ -513,10 +525,10 @@ export class Orchestrator {
     const agentType = profile?.agent_type ?? 'claude';
 
     const apiKey = profile?.credentials_encrypted ?? undefined;
-    const effectiveModel = thread.model ?? profile?.model ?? getDefaultModel(agentType);
+    const effectiveModel = thread.model ?? profile?.model ?? undefined;
 
-    this.db.appendThreadMessage(threadId, 'user', message);
-
+    // Message was already persisted by the route handler (or the auto-reply
+    // in processThreadStream's finally block), so no need to append again.
     const adapter = profile ? this.registry.resolve(profile) : this.registry.resolveByType(agentType);
     const abort = new AbortController();
 
